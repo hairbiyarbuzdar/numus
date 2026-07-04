@@ -3,7 +3,7 @@
 # 01-server-setup.sh — one-time VPS provisioning for Numu
 # Run this ONCE on a fresh Ubuntu/Debian VPS as root (or with sudo).
 #
-#   ssh root@YOUR_VPS_IP
+#   ssh root@72.61.118.49
 #   bash 01-server-setup.sh
 #
 # Installs: Node 20 LTS, PostgreSQL, PM2, Nginx, Certbot, UFW firewall.
