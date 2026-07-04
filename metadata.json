@@ -1,0 +1,6 @@
+{
+  "name": "NUMU",
+  "description": "A scalable B2B + B2C multi-vendor marketplace platform for agricultural products featuring wholesale MOQ pricing and real-time auctions.",
+  "requestFramePermissions": [],
+  "notes": "Demo Quick Access added to SignInFlow (2026-06-23): Two bypass buttons on login page let clients skip OTP and directly enter Admin or User dashboards using hardcoded demo accounts (demo_admin_001 / demo_user_001)."
+}
