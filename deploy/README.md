@@ -68,7 +68,7 @@ cd /var/www/numu
 # Backend secrets
 cp deploy/backend.env.production.example backend/.env
 nano backend/.env      # paste DB password, set CLIENT_ORIGIN=https://numu.com.pk,
-                       # generate JWT_SECRET, add your Resend key
+                       # generate JWT_SECRET, add your Brevo key
 
 # Generate a fresh JWT secret:
 node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
@@ -130,7 +130,7 @@ bash deploy/02-deploy.sh
 |---|---|
 | 502 Bad Gateway | `pm2 status` / `pm2 logs` — an app crashed (often a bad `.env` value) |
 | CORS errors in browser | `CLIENT_ORIGIN` in `backend/.env` must exactly equal `https://numu.com.pk` |
-| Login emails not arriving | `RESEND_API_KEY` + a **verified** `EMAIL_FROM` domain in Resend |
+| Login emails not arriving | `BREVO_API_KEY` + a **verified** `EMAIL_FROM` domain in Brevo |
 | Socket not connecting | Confirm Nginx `/socket.io/` block + that you rebuilt after setting the domain |
 | DB connection refused | `sudo systemctl status postgresql`; verify `backend/.env` DB_* values |
 | Frontend shows localhost API | You changed the domain but didn't rebuild — rerun `deploy/02-deploy.sh` |

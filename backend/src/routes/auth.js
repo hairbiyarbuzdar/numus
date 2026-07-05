@@ -1,14 +1,12 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
-const { Resend } = require("resend");
 const pool = require("../db");
 const { requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
 const otpSessions = new Map();
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 function normalizePhone(value = "") {
   return String(value).replace(/[^\d+]/g, "").trim();
@@ -82,21 +80,34 @@ function signToken(user) {
 }
 
 async function sendEmailOtp(email, code) {
-  if (!process.env.RESEND_API_KEY) return { deliveryMode: "demo" };
+  if (!process.env.BREVO_API_KEY) return { deliveryMode: "demo" };
 
-  await resend.emails.send({
-    from: process.env.EMAIL_FROM || "noreply@yourdomain.com",
-    to: email,
-    subject: "Your Numu verification code",
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
-        <h2 style="color:#16a34a">Your Numu OTP</h2>
-        <p>Use this code to sign in. It expires in ${OTP_TTL_SECONDS / 60} minutes.</p>
-        <div style="font-size:2rem;font-weight:700;letter-spacing:0.3em;padding:16px 0">${code}</div>
-        <p style="color:#6b7280;font-size:0.85rem">If you didn't request this, you can ignore the email.</p>
-      </div>
-    `,
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      "api-key": process.env.BREVO_API_KEY,
+    },
+    body: JSON.stringify({
+      sender: { email: process.env.EMAIL_FROM || "noreply@yourdomain.com", name: "Numu" },
+      to: [{ email }],
+      subject: "Your Numu verification code",
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto">
+          <h2 style="color:#16a34a">Your Numu OTP</h2>
+          <p>Use this code to sign in. It expires in ${OTP_TTL_SECONDS / 60} minutes.</p>
+          <div style="font-size:2rem;font-weight:700;letter-spacing:0.3em;padding:16px 0">${code}</div>
+          <p style="color:#6b7280;font-size:0.85rem">If you didn't request this, you can ignore the email.</p>
+        </div>
+      `,
+    }),
   });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Brevo email delivery failed: ${errorText}`);
+  }
 
   return { deliveryMode: "email" };
 }
