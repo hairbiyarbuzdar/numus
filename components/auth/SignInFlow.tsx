@@ -1,20 +1,24 @@
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/router";
-import { CheckCircle2, Loader2, Mail, ShieldCheck, UserRound } from "lucide-react";
+import { CheckCircle2, Loader2, Lock, Mail, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import SetPasswordStep from "./SetPasswordStep";
 
 type SignInType = "farmer" | "customer";
+type Mode = "login" | "forgot-email" | "forgot-otp" | "forgot-password";
 type Notice = { type: "success" | "error"; text: string } | null;
 
 const SignInFlow: React.FC = () => {
   const router = useRouter();
-  const { loading, requestOtp, verifyOtpAndLogin } = useAuth();
+  const { loading, loginWithPassword, requestOtp, verifyOtp, completePasswordSetup } = useAuth();
 
   const [signInType, setSignInType] = useState<SignInType>("farmer");
+  const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [transactionId, setTransactionId] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -40,25 +44,44 @@ const SignInFlow: React.FC = () => {
     else await router.push("/buyer");
   };
 
-  const handleSendOtp = async () => {
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setNotice(null);
+    if (!isValidEmail) {
+      setNotice({ type: "error", text: "Enter a valid email address." });
+      return;
+    }
+    if (!password) {
+      setNotice({ type: "error", text: "Enter your password." });
+      return;
+    }
+    try {
+      const nextUser = await loginWithPassword(email.trim(), password);
+      await redirectByRole(nextUser.role);
+    } catch (err) {
+      setNotice({ type: "error", text: err instanceof Error ? err.message : "Login failed." });
+    }
+  };
+
+  const handleForgotSendOtp = async () => {
     setNotice(null);
     if (!isValidEmail) {
       setNotice({ type: "error", text: "Enter a valid email address." });
       return;
     }
     try {
-      const result = await requestOtp(email.trim(), signInType);
+      const result = await requestOtp(email.trim());
       setTransactionId(result.transactionId);
       setOtpCode("");
-      setOtpSent(true);
       setCountdown(result.expiresInSeconds);
+      setMode("forgot-otp");
       setNotice({ type: "success", text: "OTP sent to your email. Check your inbox." });
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to send OTP." });
     }
   };
 
-  const handleVerify = async (event: React.FormEvent) => {
+  const handleForgotVerifyOtp = async (event: React.FormEvent) => {
     event.preventDefault();
     setNotice(null);
     if (!/^\d{6}$/.test(otpCode)) {
@@ -66,17 +89,39 @@ const SignInFlow: React.FC = () => {
       return;
     }
     try {
-      const nextUser = await verifyOtpAndLogin({
-        transactionId,
-        email: email.trim(),
-        otpCode,
-        userType: signInType,
-      });
-      await redirectByRole(nextUser.role);
+      const result = await verifyOtp({ transactionId, email: email.trim(), otpCode });
+      setTransactionId(result.transactionId);
+      setMode("forgot-password");
+      setNotice(null);
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "OTP verification failed." });
     }
   };
+
+  const handleSetNewPassword = async (newPassword: string) => {
+    try {
+      const nextUser = await completePasswordSetup(transactionId, email.trim(), newPassword);
+      await redirectByRole(nextUser.role);
+    } catch (err) {
+      setNotice({ type: "error", text: err instanceof Error ? err.message : "Could not set password." });
+    }
+  };
+
+  const backToLogin = () => {
+    setMode("login");
+    setPassword("");
+    setOtpCode("");
+    setTransactionId("");
+    setCountdown(0);
+    setNotice(null);
+  };
+
+  const headerCopy = {
+    login: { title: "Sign In", subtitle: "Enter your email and password" },
+    "forgot-email": { title: "Forgot Password", subtitle: "Enter your email to receive a one-time code" },
+    "forgot-otp": { title: "Verify OTP", subtitle: "Enter the code sent to your email" },
+    "forgot-password": { title: "Set New Password", subtitle: "Choose a new password for your account" },
+  }[mode];
 
   return (
     <div className="w-full max-w-xl">
@@ -86,34 +131,94 @@ const SignInFlow: React.FC = () => {
             <UserRound className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Sign In</h2>
-            <p className="text-sm text-gray-500">Enter your email to receive a one-time code</p>
+            <h2 className="text-xl font-bold text-gray-900">{headerCopy.title}</h2>
+            <p className="text-sm text-gray-500">{headerCopy.subtitle}</p>
           </div>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 gap-2 rounded-2xl bg-gray-100 p-1">
-          <button
-            type="button"
-            onClick={() => { setSignInType("farmer"); setNotice(null); setOtpSent(false); }}
-            className={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
-              signInType === "farmer" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-600"
-            }`}
-          >
-            Farmer
-          </button>
-          <button
-            type="button"
-            onClick={() => { setSignInType("customer"); setNotice(null); setOtpSent(false); }}
-            className={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
-              signInType === "customer" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-600"
-            }`}
-          >
-            Customer
-          </button>
-        </div>
+        {mode === "login" && (
+          <div className="mb-5 grid grid-cols-2 gap-2 rounded-2xl bg-gray-100 p-1">
+            <button
+              type="button"
+              onClick={() => setSignInType("farmer")}
+              className={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                signInType === "farmer" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-600"
+              }`}
+            >
+              Farmer
+            </button>
+            <button
+              type="button"
+              onClick={() => setSignInType("customer")}
+              className={`rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                signInType === "customer" ? "bg-white text-emerald-700 shadow-sm" : "text-gray-600"
+              }`}
+            >
+              Customer
+            </button>
+          </div>
+        )}
 
-        <form className="space-y-4" onSubmit={handleVerify}>
-          {!otpSent ? (
+        {mode === "login" && (
+          <form className="space-y-4" onSubmit={handleLogin}>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">Email Address</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={loading}
+                  className="w-full rounded-xl border border-gray-300 py-3 pl-10 pr-3 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
+                  placeholder="you@example.com"
+                />
+              </div>
+            </div>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-sm font-medium text-gray-700">Password</label>
+                <button
+                  type="button"
+                  onClick={() => { setMode("forgot-email"); setNotice(null); }}
+                  disabled={loading}
+                  className="text-xs font-medium text-emerald-700 hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+              <div className="relative">
+                <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={loading}
+                  className="w-full rounded-xl border border-gray-300 py-3 pl-10 pr-3 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {loading ? "Signing in..." : `Sign In as ${signInType === "farmer" ? "Farmer" : "Customer"}`}
+            </button>
+            <p className="text-center text-sm text-gray-500">
+              Don&apos;t have an account?{" "}
+              <Link href={`/register?type=${signInType}`} className="font-medium text-emerald-700 hover:underline">
+                Sign up
+              </Link>
+            </p>
+          </form>
+        )}
+
+        {mode === "forgot-email" && (
+          <div className="space-y-4">
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">Email Address</label>
               <div className="relative">
@@ -128,24 +233,33 @@ const SignInFlow: React.FC = () => {
                 />
                 <button
                   type="button"
-                  onClick={() => void handleSendOtp()}
+                  onClick={() => void handleForgotSendOtp()}
                   disabled={loading || !isValidEmail}
                   className="absolute right-1.5 top-1.5 inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send OTP"}
                 </button>
               </div>
-              <p className="mt-2 text-xs text-gray-500">
-                A 6-digit code will be sent to your email address.
-              </p>
             </div>
-          ) : (
+            <button
+              type="button"
+              onClick={backToLogin}
+              disabled={loading}
+              className="text-xs font-medium text-emerald-700 hover:underline"
+            >
+              Back to sign in
+            </button>
+          </div>
+        )}
+
+        {mode === "forgot-otp" && (
+          <form className="space-y-4" onSubmit={handleForgotVerifyOtp}>
             <div>
               <div className="mb-1.5 flex items-center justify-between">
                 <label className="block text-sm font-medium text-gray-700">Enter OTP</label>
                 <button
                   type="button"
-                  onClick={() => { setOtpSent(false); setOtpCode(""); setNotice(null); setCountdown(0); }}
+                  onClick={() => { setMode("forgot-email"); setOtpCode(""); setNotice(null); setCountdown(0); }}
                   disabled={loading}
                   className="text-xs font-medium text-emerald-700 hover:underline"
                 >
@@ -171,11 +285,21 @@ const SignInFlow: React.FC = () => {
                 className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                {loading ? "Verifying..." : `Sign In as ${signInType === "farmer" ? "Farmer" : "Customer"}`}
+                {loading ? "Verifying..." : "Verify Code"}
               </button>
             </div>
-          )}
-        </form>
+          </form>
+        )}
+
+        {mode === "forgot-password" && (
+          <SetPasswordStep
+            email={email.trim()}
+            loading={loading}
+            submitLabel="Reset Password"
+            onSubmit={handleSetNewPassword}
+            setNotice={setNotice}
+          />
+        )}
 
         {notice && (
           <p

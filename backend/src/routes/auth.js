@@ -1,11 +1,13 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const pool = require("../db");
 const { requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
+const PASSWORD_MIN_LENGTH = 8;
 const otpSessions = new Map();
 
 function normalizePhone(value = "") {
@@ -510,10 +512,104 @@ router.post("/email/otp/verify", async (req, res) => {
       user = result.rows[0];
     }
 
+    const setPasswordTransactionId = uuidv4();
+    otpSessions.set(setPasswordTransactionId, {
+      transactionId: setPasswordTransactionId,
+      email,
+      stage: "set-password",
+      expiresAt: Date.now() + OTP_TTL_SECONDS * 1000,
+    });
+
+    res.json({ transactionId: setPasswordTransactionId, email, needsPassword: true });
+  } catch (err) {
+    console.error("POST /auth/email/otp/verify error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ─── POST /auth/set-password ─────────────────────────────────────────────────
+router.post("/set-password", async (req, res) => {
+  try {
+    pruneExpiredOtpSessions();
+
+    const transactionId = String(req.body.transactionId || "").trim();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
+    if (!transactionId || !email || !password) {
+      return res.status(400).json({ message: "transactionId, email and password are required" });
+    }
+
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({ message: `Password must be at least ${PASSWORD_MIN_LENGTH} characters.` });
+    }
+
+    const session = otpSessions.get(transactionId);
+    if (!session || session.stage !== "set-password") {
+      return res.status(400).json({ message: "Verification session expired. Please verify your email again." });
+    }
+    if (session.expiresAt <= Date.now()) {
+      otpSessions.delete(transactionId);
+      return res.status(400).json({ message: "Verification session expired. Please verify your email again." });
+    }
+    if (session.email !== email) {
+      return res.status(400).json({ message: "Verification session expired. Please verify your email again." });
+    }
+
+    otpSessions.delete(transactionId);
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const { rows } = await pool.query(
+      "UPDATE users SET password_hash = $1 WHERE email = $2 RETURNING *",
+      [passwordHash, email]
+    );
+    const user = rows[0];
+    if (!user) {
+      return res.status(404).json({ message: "Account not found." });
+    }
+
     const token = signToken(user);
     res.json({ ...rowToUser(user), token });
   } catch (err) {
-    console.error("POST /auth/email/otp/verify error:", err);
+    console.error("POST /auth/set-password error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ─── POST /auth/email/login ───────────────────────────────────────────────────
+router.post("/email/login", async (req, res) => {
+  try {
+    const email = String(req.body.email || "").trim().toLowerCase();
+    const password = String(req.body.password || "");
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+    }
+
+    const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    const user = rows[0] || null;
+
+    if (!user) {
+      return res.status(404).json({ message: "No account found for this email." });
+    }
+
+    if (!user.is_active) {
+      return res.status(403).json({ message: "This account is deactivated. Contact admin." });
+    }
+
+    if (!user.password_hash) {
+      return res.status(400).json({ message: "Please finish setting up your password using 'Forgot password'." });
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatches) {
+      return res.status(401).json({ message: "Incorrect password." });
+    }
+
+    const token = signToken(user);
+    res.json({ ...rowToUser(user), token });
+  } catch (err) {
+    console.error("POST /auth/email/login error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });

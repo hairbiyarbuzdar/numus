@@ -1,21 +1,26 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/router";
-import { AlertCircle, Eye, EyeOff, KeyRound, Loader2, Mail, ShieldCheck } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, KeyRound, Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
-type Step = "email" | "otp";
+type Step = "email" | "otp" | "password";
+const PASSWORD_MIN_LENGTH = 8;
 
 export default function SuperAdminLoginPage() {
-  const { user, loading, requestOtp, verifyOtpAndLogin } = useAuth();
+  const { user, loading, requestOtp, verifyOtp, completePasswordSetup, loginWithPassword } = useAuth();
   const router = useRouter();
 
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isNewAdmin, setIsNewAdmin] = useState(false);
   const [transactionId, setTransactionId] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showCode, setShowCode] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
   const inputClassName =
@@ -35,6 +40,30 @@ export default function SuperAdminLoginPage() {
     const timer = setTimeout(() => setCountdown((currentCount) => currentCount - 1), 1000);
     return () => clearTimeout(timer);
   }, [countdown]);
+
+  const handleLoginWithPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+
+    if (!email.trim() || !password) {
+      setError("Please enter your email and password.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const loggedInUser = await loginWithPassword(email.trim(), password);
+      if (loggedInUser.role !== "superAdmin") {
+        setError("Access denied. This login is restricted to Super Admins only.");
+        return;
+      }
+      void router.replace("/admin");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleSendOtp = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -71,21 +100,43 @@ export default function SuperAdminLoginPage() {
     setBusy(true);
 
     try {
-      const loggedInUser = await verifyOtpAndLogin({
+      const result = await verifyOtp({
         transactionId,
         email: email.trim(),
         otpCode: otp.trim(),
-        userType: "admin",
       });
+      setTransactionId(result.transactionId);
+      setStep("password");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Verification failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
+  const handleSetPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const loggedInUser = await completePasswordSetup(transactionId, email.trim(), password);
       if (loggedInUser.role !== "superAdmin") {
         setError("Access denied. This login is restricted to Super Admins only.");
         return;
       }
-
       void router.replace("/admin");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Verification failed.");
+      setError(err instanceof Error ? err.message : "Could not set password.");
     } finally {
       setBusy(false);
     }
@@ -122,26 +173,8 @@ export default function SuperAdminLoginPage() {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
-          <div className="mb-6 flex items-center gap-3">
-            <div
-              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                step === "email" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700"
-              }`}
-            >
-              1
-            </div>
-            <div className={`h-px flex-1 ${step === "otp" ? "bg-emerald-500/50" : "bg-gray-200"}`} />
-            <div
-              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
-                step === "otp" ? "bg-emerald-600 text-white" : "bg-gray-100 text-gray-500"
-              }`}
-            >
-              2
-            </div>
-          </div>
-
-          {step === "email" ? (
-            <form onSubmit={handleSendOtp} className="space-y-4">
+          {step === "email" && !isNewAdmin ? (
+            <form onSubmit={handleLoginWithPassword} className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
                   Admin Email Address
@@ -160,6 +193,80 @@ export default function SuperAdminLoginPage() {
                 </div>
               </div>
 
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setIsNewAdmin(true); setError(""); }}
+                    className="text-xs font-medium text-emerald-700 hover:underline"
+                  >
+                    First time / Forgot password?
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    className={`${inputClassName} pl-9 pr-10`}
+                    disabled={busy}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((value) => !value)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-50 px-3 py-2.5 text-xs text-red-700">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <button type="submit" disabled={busy} className={primaryButtonClassName}>
+                {busy ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Signing in…
+                  </span>
+                ) : (
+                  "Access Dashboard"
+                )}
+              </button>
+            </form>
+          ) : step === "email" && isNewAdmin ? (
+            <form onSubmit={handleSendOtp} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Admin Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="admin@numu.com.pk"
+                    className={`${inputClassName} pl-9 pr-3`}
+                    disabled={busy}
+                    autoComplete="email"
+                  />
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  We'll send a one-time code to verify this is you, then let you set a password.
+                </p>
+              </div>
+
               {error && (
                 <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-50 px-3 py-2.5 text-xs text-red-700">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -176,8 +283,16 @@ export default function SuperAdminLoginPage() {
                   "Send Verification Code"
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => { setIsNewAdmin(false); setError(""); }}
+                className="w-full text-center text-xs text-gray-500 hover:text-gray-700"
+              >
+                ← Back to sign in
+              </button>
             </form>
-          ) : (
+          ) : step === "otp" ? (
             <form onSubmit={handleVerifyOtp} className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
@@ -222,7 +337,7 @@ export default function SuperAdminLoginPage() {
                     <Loader2 className="h-4 w-4 animate-spin" /> Verifying…
                   </span>
                 ) : (
-                  "Access Dashboard"
+                  "Verify Code"
                 )}
               </button>
 
@@ -232,6 +347,68 @@ export default function SuperAdminLoginPage() {
                 className="w-full text-center text-xs text-gray-500 hover:text-gray-700"
               >
                 ← Use a different email
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleSetPassword} className="space-y-4">
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  New Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="At least 8 characters"
+                    className={`${inputClassName} pl-9 pr-10`}
+                    disabled={busy}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((value) => !value)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Re-enter your password"
+                    className={`${inputClassName} pl-9 pr-10`}
+                    disabled={busy}
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-50 px-3 py-2.5 text-xs text-red-700">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <button type="submit" disabled={busy} className={primaryButtonClassName}>
+                {busy ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+                  </span>
+                ) : (
+                  "Set Password & Continue"
+                )}
               </button>
             </form>
           )}

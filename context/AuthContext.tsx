@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { User } from "../types";
-import { authService, AuthUserType, OtpStartResult } from "../services/authService";
+import { authService, AuthUserType, OtpStartResult, PasswordSetupRequired } from "../services/authService";
 
 interface AuthContextType {
   user: User | null;
@@ -9,12 +9,13 @@ interface AuthContextType {
   openAuthModal: () => void;
   closeAuthModal: () => void;
   requestOtp: (email: string, userType?: AuthUserType) => Promise<OtpStartResult>;
-  verifyOtpAndLogin: (payload: {
+  verifyOtp: (payload: {
     transactionId: string;
     email: string;
     otpCode: string;
-    userType?: AuthUserType;
-  }) => Promise<User>;
+  }) => Promise<PasswordSetupRequired>;
+  completePasswordSetup: (transactionId: string, email: string, password: string) => Promise<User>;
+  loginWithPassword: (email: string, password: string) => Promise<User>;
   logout: () => void;
 }
 
@@ -35,18 +36,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return authService.sendEmailOtp(email, userType);
   };
 
-  const verifyOtpAndLogin = async ({
+  const verifyOtp = async ({
     transactionId,
     email,
     otpCode,
-    userType,
   }: {
     transactionId: string;
     email: string;
     otpCode: string;
-    userType?: AuthUserType;
   }) => {
-    const { user: nextUser, token } = await authService.verifyEmailOtp(transactionId, email, otpCode);
+    return authService.verifyEmailOtp(transactionId, email, otpCode);
+  };
+
+  const completePasswordSetup = async (transactionId: string, email: string, password: string) => {
+    const { user: nextUser, token } = await authService.setPassword(transactionId, email, password);
+    authService.saveSession(nextUser, token);
+    setUser(nextUser);
+    setAuthModalOpen(false);
+    return nextUser;
+  };
+
+  const loginWithPassword = async (email: string, password: string) => {
+    const { user: nextUser, token } = await authService.loginWithPassword(email, password);
     authService.saveSession(nextUser, token);
     setUser(nextUser);
     setAuthModalOpen(false);
@@ -67,7 +78,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         openAuthModal: () => setAuthModalOpen(true),
         closeAuthModal: () => setAuthModalOpen(false),
         requestOtp,
-        verifyOtpAndLogin,
+        verifyOtp,
+        completePasswordSetup,
+        loginWithPassword,
         logout,
       }}
     >

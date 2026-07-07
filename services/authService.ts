@@ -10,6 +10,12 @@ export interface OtpStartResult {
   devCode: string;
 }
 
+export interface PasswordSetupRequired {
+  transactionId: string;
+  email: string;
+  needsPassword: true;
+}
+
 interface AuthSession {
   token: string;
   user: User;
@@ -49,11 +55,32 @@ export const authService = {
     transactionId: string,
     email: string,
     code: string
-  ): Promise<{ user: User; token: string }> {
-    const result = await apiClient.post<User & { token: string }>("/auth/email/otp/verify", {
+  ): Promise<PasswordSetupRequired> {
+    return apiClient.post<PasswordSetupRequired>("/auth/email/otp/verify", {
       transactionId,
       email: email.trim().toLowerCase(),
       otpCode: code.trim(),
+    });
+  },
+
+  async setPassword(
+    transactionId: string,
+    email: string,
+    password: string
+  ): Promise<{ user: User; token: string }> {
+    const result = await apiClient.post<User & { token: string }>("/auth/set-password", {
+      transactionId,
+      email: email.trim().toLowerCase(),
+      password,
+    });
+    const { token, ...user } = result;
+    return { user: user as User, token };
+  },
+
+  async loginWithPassword(email: string, password: string): Promise<{ user: User; token: string }> {
+    const result = await apiClient.post<User & { token: string }>("/auth/email/login", {
+      email: email.trim().toLowerCase(),
+      password,
     });
     const { token, ...user } = result;
     return { user: user as User, token };

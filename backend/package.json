@@ -7,9 +7,11 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "migrate": "node src/db/migrate.js",
-    "migrate:email": "node src/db/migrate-email-auth.js"
+    "migrate:email": "node src/db/migrate-email-auth.js",
+    "migrate:password": "node src/db/migrate-password-auth.js"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",

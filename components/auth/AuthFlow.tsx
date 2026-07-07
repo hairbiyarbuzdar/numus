@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/router";
 import { CheckCircle2, Loader2, Mail, MapPin, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { CITIES } from "../../constants";
+import SetPasswordStep from "./SetPasswordStep";
 
 interface AuthFlowProps {
   compact?: boolean;
@@ -11,12 +13,13 @@ interface AuthFlowProps {
 
 type Notice = { type: "success" | "error"; text: string } | null;
 type RegisterType = "farmer" | "customer";
+type Step = "form" | "otp" | "password";
 
 const sanitizeName = (value: string) => value.replace(/[^A-Za-z\s]/g, "").slice(0, 30);
 
 const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
   const router = useRouter();
-  const { loading, requestOtp, verifyOtpAndLogin } = useAuth();
+  const { loading, requestOtp, verifyOtp, completePasswordSetup } = useAuth();
 
   const [registerType, setRegisterType] = useState<RegisterType>("farmer");
   const [name, setName] = useState("");
@@ -24,11 +27,19 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
   const [city, setCity] = useState(CITIES[0] || "");
   const [otpCode, setOtpCode] = useState("");
   const [transactionId, setTransactionId] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
+  const [step, setStep] = useState<Step>("form");
   const [notice, setNotice] = useState<Notice>(null);
 
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const canSendOtp = !!name.trim() && isValidEmail;
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    const nextType = router.query.type;
+    if (nextType === "customer" || nextType === "farmer") {
+      setRegisterType(nextType);
+    }
+  }, [router.isReady, router.query.type]);
 
   const redirectByRole = async (role: string) => {
     if (role === "superAdmin") await router.push("/admin");
@@ -51,7 +62,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
       const result = await requestOtp(email.trim(), registerType);
       setTransactionId(result.transactionId);
       setOtpCode("");
-      setOtpSent(true);
+      setStep("otp");
       setNotice({ type: "success", text: "OTP sent to your email. Check your inbox." });
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to send OTP." });
@@ -66,15 +77,21 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
       return;
     }
     try {
-      const nextUser = await verifyOtpAndLogin({
-        transactionId,
-        email: email.trim(),
-        otpCode,
-        userType: registerType,
-      });
-      await redirectByRole(nextUser.role);
+      const result = await verifyOtp({ transactionId, email: email.trim(), otpCode });
+      setTransactionId(result.transactionId);
+      setStep("password");
+      setNotice(null);
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "OTP verification failed." });
+    }
+  };
+
+  const handleSetPassword = async (password: string) => {
+    try {
+      const nextUser = await completePasswordSetup(transactionId, email.trim(), password);
+      await redirectByRole(nextUser.role);
+    } catch (err) {
+      setNotice({ type: "error", text: err instanceof Error ? err.message : "Could not set password." });
     }
   };
 
@@ -94,60 +111,61 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
         </div>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => { setRegisterType("farmer"); setNotice(null); setOtpSent(false); }}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-            registerType === "farmer" ? "bg-emerald-600 text-white" : "border border-gray-300 bg-white text-gray-700"
-          }`}
-        >
-          Farmer
-        </button>
-        <button
-          type="button"
-          onClick={() => { setRegisterType("customer"); setNotice(null); setOtpSent(false); }}
-          className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-            registerType === "customer" ? "bg-emerald-600 text-white" : "border border-gray-300 bg-white text-gray-700"
-          }`}
-        >
-          Customer
-        </button>
-      </div>
-
-      <form className="space-y-4" onSubmit={handleVerify}>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700">Full Name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(sanitizeName(e.target.value))}
-            disabled={loading || otpSent}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
-            placeholder="Enter your full name"
-            maxLength={30}
-          />
+      {step === "form" && (
+        <div className="mb-5 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => { setRegisterType("farmer"); setNotice(null); }}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              registerType === "farmer" ? "bg-emerald-600 text-white" : "border border-gray-300 bg-white text-gray-700"
+            }`}
+          >
+            Farmer
+          </button>
+          <button
+            type="button"
+            onClick={() => { setRegisterType("customer"); setNotice(null); }}
+            className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+              registerType === "customer" ? "bg-emerald-600 text-white" : "border border-gray-300 bg-white text-gray-700"
+            }`}
+          >
+            Customer
+          </button>
         </div>
+      )}
 
-        {registerType === "customer" && (
+      {step === "form" && (
+        <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">City</label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-              <select
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                disabled={otpSent}
-                className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
-              >
-                {CITIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Full Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(sanitizeName(e.target.value))}
+              disabled={loading}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
+              placeholder="Enter your full name"
+              maxLength={30}
+            />
           </div>
-        )}
 
-        {!otpSent ? (
+          {registerType === "customer" && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">City</label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <select
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
+                >
+                  {CITIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Email Address</label>
             <div className="relative">
@@ -170,13 +188,24 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
               </button>
             </div>
           </div>
-        ) : (
+
+          <p className="text-center text-sm text-gray-500">
+            Already have an account?{" "}
+            <Link href={`/login?type=${registerType}`} className="font-medium text-emerald-700 hover:underline">
+              Sign in
+            </Link>
+          </p>
+        </div>
+      )}
+
+      {step === "otp" && (
+        <form className="space-y-4" onSubmit={handleVerify}>
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className="block text-sm font-medium text-gray-700">OTP (6 digits)</label>
               <button
                 type="button"
-                onClick={() => { setOtpSent(false); setOtpCode(""); setNotice(null); }}
+                onClick={() => { setStep("form"); setOtpCode(""); setNotice(null); }}
                 disabled={loading}
                 className="text-xs font-medium text-emerald-700 hover:underline"
               >
@@ -201,11 +230,22 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              {loading ? "Verifying..." : "Verify & Create Account"}
+              {loading ? "Verifying..." : "Verify Code"}
             </button>
           </div>
-        )}
-      </form>
+        </form>
+      )}
+
+      {step === "password" && (
+        <SetPasswordStep
+          email={email.trim()}
+          loading={loading}
+          submitLabel="Create Account"
+          onSubmit={handleSetPassword}
+          setNotice={setNotice}
+          compact
+        />
+      )}
 
       {notice && (
         <p
