@@ -1,19 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from "next/router";
-import { formatCurrency, calculateBulkPrice, getTimeRemaining } from '../../utils/helpers';
+import { formatCurrency, calculateBulkPrice, formatDateTime, getTimeRemaining, hasAuctionStarted } from '../../utils/helpers';
 import { ShoppingCart, Gavel, Clock, ArrowLeft, CheckCircle, AlertCircle, TrendingUp, Zap } from 'lucide-react';
 import { Product } from '../../types';
 import { useCart } from '../../context/CartContext';
 import { useProducts } from '../../context/ProductContext';
 import { useAuth } from '../../context/AuthContext';
 import { useWishlist } from '../../context/WishlistContext';
+import { Skeleton, SkeletonLines } from '../../components/Skeleton';
 
 const ProductDetails: React.FC = () => {
   const router = useRouter();
   const idParam = router.query.id;
   const id = Array.isArray(idParam) ? idParam[0] : idParam;
   const { addToCart } = useCart();
-  const { products, placeBid } = useProducts();
+  const { products, loaded, ensureProducts, placeBid } = useProducts();
   const { user } = useAuth();
   const { addToWishlist, removeFromWishlist, isWishlisted } = useWishlist();
   const [selectedQty, setSelectedQty] = useState<number>(1);
@@ -28,6 +29,11 @@ const ProductDetails: React.FC = () => {
         : null,
     [id, products]
   );
+
+  // The catalogue is fetched when a product page opens, not at login.
+  useEffect(() => {
+    void ensureProducts();
+  }, [ensureProducts]);
 
   useEffect(() => {
     if (!product) return;
@@ -50,6 +56,20 @@ const ProductDetails: React.FC = () => {
 
     return () => clearInterval(timer);
   }, [product?.auctionEndTime]);
+
+  // Until the catalogue has loaded, "not found" is indistinguishable from
+  // "not fetched yet" — show the skeleton rather than a false negative.
+  if (!loaded) {
+    return (
+      <div className="space-y-6 p-2">
+        <SkeletonLines lines={1} className="max-w-[160px]" label="Loading product" />
+        <div className="grid gap-8 lg:grid-cols-2">
+          <Skeleton className="h-80 w-full rounded-2xl" />
+          <SkeletonLines lines={6} />
+        </div>
+      </div>
+    );
+  }
 
   if (!product) return <div className="p-8 text-gray-600">Product is unavailable or has been removed.</div>;
 
@@ -238,6 +258,12 @@ const ProductDetails: React.FC = () => {
                   </div>
 
                   <div className="pt-4 border-t border-gray-200">
+                    {!hasAuctionStarted(product) ? (
+                      <p className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+                        Bidding opens {formatDateTime(product.auctionStartTime)}. You can place a bid once the auction starts.
+                      </p>
+                    ) : (
+                      <>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Your Maximum Bid</label>
                     <div className="flex gap-2">
                       <div className="relative flex-grow">
@@ -259,11 +285,18 @@ const ProductDetails: React.FC = () => {
                     <p className="text-xs text-gray-500 mt-2">
                       Minimum bid increment: {formatCurrency(product.bidIncrement || 0)}. Next bid must be at least {formatCurrency(minimumNextBid)}.
                     </p>
+                      </>
+                    )}
                   </div>
                 </div>
               ) : (
                 // RETAIL / WHOLESALE UI
                 <div className="space-y-6">
+                  {product.status === 'out_of_stock' && (
+                    <span className="inline-flex w-fit items-center rounded-md bg-gray-900 px-2.5 py-1 text-xs font-bold text-white">
+                      Out of Stock
+                    </span>
+                  )}
                   <div className="flex justify-between items-end">
                     <div>
                       <p className="text-sm text-gray-500 mb-1">Price per unit</p>
@@ -307,11 +340,12 @@ const ProductDetails: React.FC = () => {
                       <p className="text-xs text-center text-gray-500 mt-1">Min Order: {product.minOrderQty}</p>
                     </div>
                     <div className="flex-grow flex items-start">
-                       <button 
+                       <button
                         onClick={handleAddToCart}
-                        className="w-full h-[50px] bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+                        disabled={product.status === 'out_of_stock'}
+                        className="w-full h-[50px] bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:shadow-none"
                        >
-                         <ShoppingCart className="w-5 h-5" /> Add to Order
+                         <ShoppingCart className="w-5 h-5" /> {product.status === 'out_of_stock' ? 'Out of Stock' : 'Add to Order'}
                        </button>
                     </div>
                   </div>

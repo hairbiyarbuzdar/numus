@@ -1,12 +1,219 @@
 const express = require("express");
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
-const { requireRole } = require("../middleware/auth");
+const { requireRole, requireApprovedVendor } = require("../middleware/auth");
 const { emitNotification } = require("../socket");
 
 const router = express.Router();
 
+const VALID_PRODUCT_STATUSES = ["draft", "active", "out_of_stock", "inactive", "archived"];
+const VALID_APPROVAL_STATUSES = ["pending", "approved", "rejected"];
+const VALID_PRODUCT_TYPES = ["retail", "wholesale", "auction"];
+
+// Shown whenever an auction edit is refused because the auction is already open
+// to bidders — the terms buyers bid against must not change under them.
+const AUCTION_LOCKED_MESSAGE = "Auction details cannot be modified after bidding has started.";
+
+// Whitelisted sort keys — never interpolate client input into ORDER BY.
+const SORT_OPTIONS = {
+  newest: "p.created_at DESC",
+  oldest: "p.created_at ASC",
+  title_asc: "p.title ASC",
+  title_desc: "p.title DESC",
+  price_asc: "COALESCE(p.base_price, p.starting_price) ASC NULLS LAST",
+  price_desc: "COALESCE(p.base_price, p.starting_price) DESC NULLS LAST",
+  stock_asc: "p.stock ASC NULLS LAST",
+  stock_desc: "p.stock DESC NULLS LAST",
+  ending_soonest: "p.auction_end_time ASC NULLS LAST",
+  ending_latest: "p.auction_end_time DESC NULLS LAST",
+  bid_asc: "COALESCE(p.current_highest_bid, 0) ASC",
+  bid_desc: "COALESCE(p.current_highest_bid, 0) DESC",
+};
+const DEFAULT_SORT = "newest";
+
+const MAX_PAGE_SIZE = 100;
+
+// The status shown for an auction is derived: the approval workflow gates the
+// auction lifecycle, so filtering by it needs both columns. Mirrors
+// getAuctionDisplayStatus() in utils/helpers.ts. Each clause is self-contained
+// because they are AND-joined with the other filters.
+const AUCTION_STATE_FILTERS = {
+  pending: "(p.approval_status = 'pending')",
+  rejected: "(p.approval_status = 'rejected')",
+  active: "(p.approval_status = 'approved' AND p.auction_status = 'live')",
+  ended: "(p.approval_status = 'approved' AND p.auction_status = 'ended')",
+  cancelled: "(p.approval_status = 'approved' AND p.auction_status = 'cancelled')",
+};
+
+// Which timestamp a dateFrom/dateTo range applies to.
+const DATE_RANGE_FIELDS = {
+  created: "p.created_at",
+  start: "p.auction_start_time",
+  end: "p.auction_end_time",
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// `%`, `_` and `\` are wildcards/escapes in ILIKE — treat them as literals so a
+// search for "50%" doesn't match everything.
+function toLikePattern(term) {
+  return `%${term.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Accepts epoch milliseconds (what the UI sends, so day boundaries follow the
+ * user's own clock) or any date string Date.parse understands. Returns null for
+ * "not supplied" and NaN for "supplied but unusable".
+ */
+function parseTimestamp(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber)) return Math.trunc(asNumber);
+  return Date.parse(value);
+}
+
+/**
+ * Builds the shared WHERE clause for product listings from the request.
+ * Returns { where, values, nextIndex } or { error } for invalid filter values.
+ */
+function buildProductFilters(req, startIndex = 1) {
+  const conditions = [];
+  const values = [];
+  let i = startIndex;
+
+  const {
+    vendorId,
+    approvalStatus,
+    productType,
+    isActive,
+    status,
+    category,
+    search,
+    minPrice,
+    maxPrice,
+    auctionState,
+    dateField,
+    dateFrom,
+    dateTo,
+  } = req.query;
+
+  // Vendors see only their own products; buyers/admin see all
+  const actorRole = req.actor.role;
+  const actorId = req.actor.userId;
+
+  if (actorRole === "vendor") {
+    conditions.push(`p.vendor_id = $${i++}`);
+    values.push(actorId);
+  } else if (vendorId) {
+    conditions.push(`p.vendor_id = $${i++}`);
+    values.push(vendorId);
+  }
+
+  if (approvalStatus) {
+    if (!VALID_APPROVAL_STATUSES.includes(approvalStatus)) {
+      return { error: `approvalStatus must be one of: ${VALID_APPROVAL_STATUSES.join(", ")}` };
+    }
+    conditions.push(`p.approval_status = $${i++}`);
+    values.push(approvalStatus);
+  }
+
+  if (productType) {
+    if (!VALID_PRODUCT_TYPES.includes(productType)) {
+      return { error: `productType must be one of: ${VALID_PRODUCT_TYPES.join(", ")}` };
+    }
+    conditions.push(`p.product_type = $${i++}`);
+    values.push(productType);
+  }
+
+  if (status) {
+    if (!VALID_PRODUCT_STATUSES.includes(status)) {
+      return { error: `status must be one of: ${VALID_PRODUCT_STATUSES.join(", ")}` };
+    }
+    conditions.push(`p.status = $${i++}`);
+    values.push(status);
+  }
+
+  if (isActive !== undefined) {
+    conditions.push(`p.is_active = $${i++}`);
+    values.push(isActive === "true");
+  }
+
+  if (category) {
+    conditions.push(`p.category = $${i++}`);
+    values.push(category);
+  }
+
+  if (auctionState !== undefined && auctionState !== "") {
+    const clause = AUCTION_STATE_FILTERS[auctionState];
+    if (!clause) {
+      return { error: `auctionState must be one of: ${Object.keys(AUCTION_STATE_FILTERS).join(", ")}` };
+    }
+    conditions.push(clause);
+  }
+
+  if (dateField !== undefined && dateField !== "" && !DATE_RANGE_FIELDS[dateField]) {
+    return { error: `dateField must be one of: ${Object.keys(DATE_RANGE_FIELDS).join(", ")}` };
+  }
+  const dateColumn = DATE_RANGE_FIELDS[dateField] || DATE_RANGE_FIELDS.created;
+
+  const fromTimestamp = parseTimestamp(dateFrom);
+  if (Number.isNaN(fromTimestamp)) return { error: "dateFrom must be a timestamp or date" };
+  if (fromTimestamp !== null) {
+    conditions.push(`${dateColumn} >= $${i++}`);
+    values.push(fromTimestamp);
+  }
+
+  const toTimestamp = parseTimestamp(dateTo);
+  if (Number.isNaN(toTimestamp)) return { error: "dateTo must be a timestamp or date" };
+  if (toTimestamp !== null) {
+    conditions.push(`${dateColumn} <= $${i++}`);
+    values.push(toTimestamp);
+  }
+
+  // Searching by id lets an admin paste a reference straight from a card or an
+  // order; vendor_name is matched because the listings show the vendor.
+  const searchTerm = typeof search === "string" ? search.trim() : "";
+  if (searchTerm) {
+    conditions.push(
+      `(p.title ILIKE $${i} OR p.description ILIKE $${i} OR p.category ILIKE $${i}
+        OR p.vendor_name ILIKE $${i} OR p.id ILIKE $${i})`
+    );
+    values.push(toLikePattern(searchTerm));
+    i++;
+  }
+
+  if (minPrice !== undefined && minPrice !== "") {
+    const parsed = Number(minPrice);
+    if (!Number.isFinite(parsed)) return { error: "minPrice must be a number" };
+    conditions.push(`COALESCE(p.base_price, p.starting_price) >= $${i++}`);
+    values.push(parsed);
+  }
+
+  if (maxPrice !== undefined && maxPrice !== "") {
+    const parsed = Number(maxPrice);
+    if (!Number.isFinite(parsed)) return { error: "maxPrice must be a number" };
+    conditions.push(`COALESCE(p.base_price, p.starting_price) <= $${i++}`);
+    values.push(parsed);
+  }
+
+  // Buyers only see approved + active products that are published (not draft/inactive/archived)
+  if (actorRole === "buyer") {
+    conditions.push(`p.approval_status = 'approved'`);
+    conditions.push(`p.is_active = TRUE`);
+    conditions.push(`p.status IN ('active', 'out_of_stock')`);
+  }
+
+  return {
+    where: conditions.length ? `WHERE ${conditions.join(" AND ")}` : "",
+    values,
+    nextIndex: i,
+  };
+}
 
 function rowToProduct(row) {
   return {
@@ -41,6 +248,7 @@ function rowToProduct(row) {
 
     // Status
     isActive: row.is_active,
+    status: row.status,
     approvalStatus: row.approval_status,
     isApproved: row.approval_status === "approved",
     submittedAt: row.submitted_at ? parseInt(row.submitted_at) : undefined,
@@ -73,54 +281,70 @@ async function getBidsForProduct(productId) {
   }));
 }
 
+/**
+ * Bidding is open once the start time has passed or a bid has already landed
+ * (a bid can predate the start time on auctions created before that guard
+ * existed). A row with no start time is treated as open — it is indistinguishable
+ * from an auction that started immediately, so the safe answer is "locked".
+ */
+async function hasAuctionBiddingStarted(row) {
+  const { rows } = await pool.query(
+    "SELECT COUNT(*)::int AS bid_count FROM bids WHERE product_id = $1",
+    [row.id]
+  );
+  if (rows[0].bid_count > 0) return true;
+
+  const startTime = row.auction_start_time ? parseInt(row.auction_start_time) : null;
+  return startTime === null || Date.now() >= startTime;
+}
+
 // ─── GET /products ─────────────────────────────────────────────────────────────
-// Query params: vendorId, approvalStatus, productType, isActive
+// Filters: vendorId, approvalStatus, productType, isActive, status, category,
+//          search (title/description/category/vendor/id), minPrice, maxPrice,
+//          auctionState (pending|active|rejected|ended|cancelled),
+//          dateFrom/dateTo with dateField (created|start|end, default created)
+// Sorting: sort (see SORT_OPTIONS)
+// Paging:  page, pageSize — when either is supplied the response becomes
+//          { data, page, pageSize, total, totalPages, hasMore } instead of a
+//          bare array, so existing callers that expect an array keep working.
 router.get("/", async (req, res) => {
   try {
-    const conditions = [];
-    const values = [];
-    let i = 1;
+    const filters = buildProductFilters(req);
+    if (filters.error) return res.status(400).json({ message: filters.error });
 
-    const { vendorId, approvalStatus, productType, isActive } = req.query;
+    const { where, values, nextIndex } = filters;
+    const orderBy = SORT_OPTIONS[req.query.sort] || SORT_OPTIONS[DEFAULT_SORT];
+    // Stable tiebreaker so a row can't shift between pages when sort keys tie.
+    const orderClause = `ORDER BY ${orderBy}, p.id ASC`;
 
-    // Vendors see only their own products; buyers/admin see all
-    const actorRole = req.actor.role;
-    const actorId = req.actor.userId;
+    const paginated = req.query.page !== undefined || req.query.pageSize !== undefined;
 
-    if (actorRole === "vendor") {
-      conditions.push(`p.vendor_id = $${i++}`);
-      values.push(actorId);
-    } else if (vendorId) {
-      conditions.push(`p.vendor_id = $${i++}`);
-      values.push(vendorId);
+    let sql = `SELECT p.* FROM products p ${where} ${orderClause}`;
+    const queryValues = [...values];
+    let page = 1;
+    let pageSize = 0;
+    let total = 0;
+
+    if (paginated) {
+      page = parsePositiveInt(req.query.page, 1);
+      pageSize = Math.min(parsePositiveInt(req.query.pageSize, 10), MAX_PAGE_SIZE);
+
+      const { rows: countRows } = await pool.query(
+        `SELECT COUNT(*)::int AS total FROM products p ${where}`,
+        values
+      );
+      total = countRows[0].total;
+
+      // Clamp a page that ran off the end (e.g. after deleting the last row on
+      // the final page) back to the last page that has data.
+      const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+      if (page > totalPages) page = totalPages;
+
+      sql += ` LIMIT $${nextIndex} OFFSET $${nextIndex + 1}`;
+      queryValues.push(pageSize, (page - 1) * pageSize);
     }
 
-    if (approvalStatus) {
-      conditions.push(`p.approval_status = $${i++}`);
-      values.push(approvalStatus);
-    }
-
-    if (productType) {
-      conditions.push(`p.product_type = $${i++}`);
-      values.push(productType);
-    }
-
-    if (isActive !== undefined) {
-      conditions.push(`p.is_active = $${i++}`);
-      values.push(isActive === "true");
-    }
-
-    // Buyers only see approved + active products
-    if (actorRole === "buyer") {
-      conditions.push(`p.approval_status = 'approved'`);
-      conditions.push(`p.is_active = TRUE`);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const { rows } = await pool.query(
-      `SELECT p.* FROM products p ${where} ORDER BY p.created_at DESC`,
-      values
-    );
+    const { rows } = await pool.query(sql, queryValues);
 
     // Fetch bids for auction products
     const products = await Promise.all(
@@ -133,9 +357,48 @@ router.get("/", async (req, res) => {
       })
     );
 
-    res.json(products);
+    if (!paginated) return res.json(products);
+
+    const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+    res.json({
+      data: products,
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasMore: page < totalPages,
+    });
   } catch (err) {
     console.error("GET /products error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ─── GET /products/filter-options ─────────────────────────────────────────────
+// Distinct values available within the caller's own visible product scope, so
+// the filter UI only ever offers options that can actually return results.
+router.get("/filter-options", async (req, res) => {
+  try {
+    // Scope by actor/vendor and product type only — ignore the active filters so
+    // the dropdowns don't shrink to whatever is already selected. productType is
+    // a scope, not a filter: the auctions page must not offer retail categories.
+    const scopeReq = {
+      actor: req.actor,
+      query: { vendorId: req.query.vendorId, productType: req.query.productType },
+    };
+    const filters = buildProductFilters(scopeReq);
+    if (filters.error) return res.status(400).json({ message: filters.error });
+
+    const { rows } = await pool.query(
+      `SELECT DISTINCT p.category FROM products p ${filters.where}
+       ${filters.where ? "AND" : "WHERE"} p.category IS NOT NULL AND p.category <> ''
+       ORDER BY p.category ASC`,
+      filters.values
+    );
+
+    res.json({ categories: rows.map((row) => row.category) });
+  } catch (err) {
+    console.error("GET /products/filter-options error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -190,7 +453,7 @@ router.post("/close-expired-auctions", async (req, res) => {
 });
 
 // ─── POST /products ─────────────────────────────────────────────────────────
-router.post("/", requireRole("vendor"), async (req, res) => {
+router.post("/", requireRole("vendor"), requireApprovedVendor, async (req, res) => {
   try {
     const {
       vendorId,
@@ -205,21 +468,29 @@ router.post("/", requireRole("vendor"), async (req, res) => {
       stock,
       minOrderQty,
       bulkTiers,
+      status,
     } = req.body;
 
     if (!title || !productType) {
       return res.status(400).json({ message: "title and productType are required" });
     }
 
+    if (status && !VALID_PRODUCT_STATUSES.includes(status)) {
+      return res.status(400).json({ message: `status must be one of: ${VALID_PRODUCT_STATUSES.join(", ")}` });
+    }
+
     const id = uuidv4();
     const now = Date.now();
     const imgArray = images || (image ? [image] : []);
+    const productStatus = status || "active";
+    // Drafts haven't been submitted for admin review yet.
+    const submittedAt = productStatus === "draft" ? null : now;
 
     await pool.query(
       `INSERT INTO products
          (id, vendor_id, vendor_name, title, description, category, images, product_type,
-          base_price, stock, min_order_qty, bulk_tiers, approval_status, submitted_at, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending',$13,$13,$13)`,
+          base_price, stock, min_order_qty, bulk_tiers, status, approval_status, submitted_at, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending',$14,$15,$15)`,
       [
         id,
         vendorId || req.actor.userId,
@@ -233,6 +504,8 @@ router.post("/", requireRole("vendor"), async (req, res) => {
         stock || null,
         minOrderQty || 1,
         bulkTiers ? JSON.stringify(bulkTiers) : null,
+        productStatus,
+        submittedAt,
         now,
       ]
     );
@@ -246,7 +519,7 @@ router.post("/", requireRole("vendor"), async (req, res) => {
 });
 
 // ─── POST /products/auctions ─────────────────────────────────────────────────
-router.post("/auctions", requireRole("vendor"), async (req, res) => {
+router.post("/auctions", requireRole("vendor"), requireApprovedVendor, async (req, res) => {
   try {
     const {
       vendorId,
@@ -350,8 +623,12 @@ router.get("/:id", async (req, res) => {
 // ─── PATCH /products/:id ─────────────────────────────────────────────────────
 router.patch("/:id", requireRole("vendor", "superAdmin"), async (req, res) => {
   try {
-    const { title, description, category, basePrice, stock, minOrderQty, images } = req.body;
+    const { title, description, category, basePrice, stock, minOrderQty, images, status } = req.body;
     const now = Date.now();
+
+    if (status !== undefined && !VALID_PRODUCT_STATUSES.includes(status)) {
+      return res.status(400).json({ message: `status must be one of: ${VALID_PRODUCT_STATUSES.join(", ")}` });
+    }
 
     const fields = [];
     const values = [];
@@ -364,6 +641,23 @@ router.patch("/:id", requireRole("vendor", "superAdmin"), async (req, res) => {
     if (stock !== undefined)        { fields.push(`stock = $${i++}`);          values.push(stock); }
     if (minOrderQty !== undefined)  { fields.push(`min_order_qty = $${i++}`);  values.push(minOrderQty); }
     if (images !== undefined)       { fields.push(`images = $${i++}`);         values.push(JSON.stringify(images)); }
+
+    if (status !== undefined) {
+      fields.push(`status = $${i++}`);
+      values.push(status);
+
+      // First time leaving 'draft' is when it actually enters the admin review pipeline.
+      if (status !== "draft") {
+        const { rows: existingRows } = await pool.query(
+          "SELECT submitted_at FROM products WHERE id = $1",
+          [req.params.id]
+        );
+        if (existingRows.length && existingRows[0].submitted_at === null) {
+          fields.push(`submitted_at = $${i++}`);
+          values.push(now);
+        }
+      }
+    }
 
     if (!fields.length) return res.status(400).json({ message: "Nothing to update" });
 
@@ -378,6 +672,184 @@ router.patch("/:id", requireRole("vendor", "superAdmin"), async (req, res) => {
     res.json(rowToProduct(rows[0]));
   } catch (err) {
     console.error("PATCH /products/:id error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ─── PATCH /products/:id/auction ──────────────────────────────────────────────
+// Auction counterpart to PATCH /products/:id. A vendor may revise their auction
+// while it is still waiting to open; once bidding has started the terms are
+// frozen so buyers keep bidding on exactly what they were shown.
+router.patch("/:id/auction", requireRole("vendor", "superAdmin"), async (req, res) => {
+  try {
+    const { rows: existingRows } = await pool.query("SELECT * FROM products WHERE id = $1", [
+      req.params.id,
+    ]);
+    if (!existingRows.length) return res.status(404).json({ message: "Auction not found" });
+
+    const existing = existingRows[0];
+    if (!existing.is_auction) return res.status(400).json({ message: "Not an auction" });
+
+    if (req.actor.role === "vendor" && existing.vendor_id !== req.actor.userId) {
+      return res.status(403).json({ message: "Forbidden — this auction belongs to another vendor" });
+    }
+
+    if (existing.auction_status === "ended") {
+      return res.status(409).json({ message: "This auction has ended and can no longer be edited." });
+    }
+    if (existing.auction_status === "cancelled") {
+      return res.status(409).json({ message: "This auction was cancelled and can no longer be edited." });
+    }
+    if (await hasAuctionBiddingStarted(existing)) {
+      return res.status(409).json({ message: AUCTION_LOCKED_MESSAGE });
+    }
+
+    const {
+      title,
+      description,
+      category,
+      images,
+      startingPrice,
+      bidIncrement,
+      buyNowPrice,
+      auctionQuantity,
+      auctionStartTime,
+      auctionEndTime,
+    } = req.body;
+
+    const now = Date.now();
+    const fields = [];
+    const values = [];
+    let i = 1;
+    const setField = (column, value) => {
+      fields.push(`${column} = $${i++}`);
+      values.push(value);
+    };
+
+    if (title !== undefined) {
+      if (typeof title !== "string" || !title.trim()) {
+        return res.status(400).json({ message: "title cannot be empty" });
+      }
+      setField("title", title.trim());
+    }
+    if (description !== undefined) {
+      setField("description", typeof description === "string" ? description.trim() : description);
+    }
+    if (category !== undefined) {
+      if (typeof category !== "string" || !category.trim()) {
+        return res.status(400).json({ message: "category cannot be empty" });
+      }
+      setField("category", category.trim());
+    }
+    if (images !== undefined) {
+      if (!Array.isArray(images) || !images.length) {
+        return res.status(400).json({ message: "images must contain at least one image" });
+      }
+      setField("images", JSON.stringify(images));
+    }
+
+    // Effective values — a field the request left out keeps its stored value, so
+    // cross-field checks (buy now vs starting price, end vs start) stay correct.
+    let nextStartingPrice = existing.starting_price !== null ? parseFloat(existing.starting_price) : null;
+    if (startingPrice !== undefined) {
+      const parsed = Number(startingPrice);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return res.status(400).json({ message: "Starting price must be greater than 0." });
+      }
+      nextStartingPrice = parsed;
+      setField("starting_price", parsed);
+    }
+
+    if (bidIncrement !== undefined) {
+      const parsed = Number(bidIncrement);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return res.status(400).json({ message: "Bid increment must be greater than 0." });
+      }
+      setField("bid_increment", parsed);
+    }
+
+    if (auctionQuantity !== undefined) {
+      const parsed = Number(auctionQuantity);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return res.status(400).json({ message: "Quantity must be a whole number of 1 or more." });
+      }
+      setField("auction_quantity", parsed);
+    }
+
+    if (buyNowPrice !== undefined) {
+      if (buyNowPrice === null || buyNowPrice === "") {
+        setField("buy_now_price", null);
+      } else {
+        const parsed = Number(buyNowPrice);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return res.status(400).json({ message: "Buy now price must be greater than 0." });
+        }
+        if (nextStartingPrice !== null && parsed < nextStartingPrice) {
+          return res.status(400).json({ message: "Buy now price must be at least the starting price." });
+        }
+        setField("buy_now_price", parsed);
+      }
+    }
+
+    let nextStartTime = existing.auction_start_time ? parseInt(existing.auction_start_time) : null;
+    let nextEndTime = existing.auction_end_time ? parseInt(existing.auction_end_time) : null;
+
+    if (auctionStartTime !== undefined) {
+      const parsed = Number(auctionStartTime);
+      if (!Number.isFinite(parsed)) {
+        return res.status(400).json({ message: "auctionStartTime must be a timestamp" });
+      }
+      // A start time in the past would lock the auction the moment it is saved.
+      if (parsed <= now) {
+        return res.status(400).json({ message: "Auction start time must be in the future." });
+      }
+      nextStartTime = parsed;
+      setField("auction_start_time", parsed);
+    }
+
+    if (auctionEndTime !== undefined) {
+      const parsed = Number(auctionEndTime);
+      if (!Number.isFinite(parsed)) {
+        return res.status(400).json({ message: "auctionEndTime must be a timestamp" });
+      }
+      nextEndTime = parsed;
+      setField("auction_end_time", parsed);
+    }
+
+    if (nextEndTime !== null && nextStartTime !== null && nextEndTime <= nextStartTime) {
+      return res.status(400).json({ message: "Auction end time must be after the start time." });
+    }
+    if (nextEndTime !== null && nextEndTime <= now) {
+      return res.status(400).json({ message: "Auction end time must be in the future." });
+    }
+
+    if (!fields.length) return res.status(400).json({ message: "Nothing to update" });
+
+    setField("updated_at", now);
+
+    // Re-checked in the UPDATE itself: a bid can land between the read above and
+    // the write, and that bid must win the race.
+    const guardIndex = i++;
+    values.push(now);
+    const idIndex = i;
+    values.push(req.params.id);
+
+    const { rowCount } = await pool.query(
+      `UPDATE products SET ${fields.join(", ")}
+       WHERE id = $${idIndex}
+         AND auction_status = 'live'
+         AND auction_start_time > $${guardIndex}
+         AND NOT EXISTS (SELECT 1 FROM bids WHERE bids.product_id = products.id)`,
+      values
+    );
+    if (!rowCount) return res.status(409).json({ message: AUCTION_LOCKED_MESSAGE });
+
+    const { rows } = await pool.query("SELECT * FROM products WHERE id = $1", [req.params.id]);
+    const product = rowToProduct(rows[0]);
+    product.bids = await getBidsForProduct(req.params.id);
+    res.json(product);
+  } catch (err) {
+    console.error("PATCH /products/:id/auction error:", err);
     res.status(500).json({ message: "Server error" });
   }
 });
@@ -487,6 +959,14 @@ router.post("/:id/bids", requireRole("buyer"), async (req, res) => {
     const product = pRows[0];
     if (!product.is_auction) return res.status(400).json({ message: "Not an auction" });
     if (product.auction_status !== "live") return res.status(400).json({ message: "Auction is not live" });
+
+    // Bidding opens at the start time — before that the vendor can still edit
+    // the terms (see PATCH /products/:id/auction), so no bid may land yet.
+    const startTime = product.auction_start_time ? parseInt(product.auction_start_time) : null;
+    if (startTime !== null && Date.now() < startTime) {
+      return res.status(400).json({ message: "Bidding has not started for this auction yet." });
+    }
+
     if (Date.now() > parseInt(product.auction_end_time)) return res.status(400).json({ message: "Auction has ended" });
 
     const minBid =

@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -18,7 +18,8 @@ import { TrendingUp, Users, ShoppingCart, Gavel, Package, DollarSign } from "luc
 import { useUsers } from "../../context/UsersContext";
 import { useProducts } from "../../context/ProductContext";
 import { useOrders } from "../../context/OrdersContext";
-import { formatCurrency } from "../../utils/helpers";
+import { formatCurrency, getAuctionDisplayStatus } from "../../utils/helpers";
+import { SkeletonStats } from "../../components/Skeleton";
 
 const COLORS = ["#06b6d4", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#f97316"];
 
@@ -40,9 +41,17 @@ const StatTile: React.FC<{ label: string; value: string; sub?: string; icon: Rea
 );
 
 const AdminInsights: React.FC = () => {
-  const { users } = useUsers();
-  const { products } = useProducts();
+  const { users, loaded: usersLoaded, ensureUsers } = useUsers();
+  const { products, loaded: productsLoaded, ensureProducts } = useProducts();
   const { orders } = useOrders();
+
+  // Fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureUsers();
+    void ensureProducts();
+  }, [ensureProducts, ensureUsers]);
+
+  const isLoading = !usersLoaded || !productsLoaded;
 
   const appUsers = useMemo(() => users.filter((u) => u.userType !== "admin"), [users]);
 
@@ -52,7 +61,8 @@ const AdminInsights: React.FC = () => {
     const customers = appUsers.filter((u) => u.userType === "customer").length;
     const totalRevenue = orders.reduce((s, o) => s + o.total, 0);
     const pendingOrders = orders.filter((o) => o.status === "Pending").length;
-    const liveAuctions = products.filter((p) => p.isAuction && p.auctionStatus === "live").length;
+    // Only approved auctions are actually live to buyers.
+    const liveAuctions = products.filter((p) => p.isAuction && getAuctionDisplayStatus(p) === "active").length;
     const pendingApprovals = products.filter((p) => p.approvalStatus === "pending").length;
     return { farmers, customers, totalRevenue, pendingOrders, liveAuctions, pendingApprovals };
   }, [appUsers, orders, products]);
@@ -139,6 +149,8 @@ const AdminInsights: React.FC = () => {
       </section>
 
       {/* KPI tiles */}
+      {isLoading && <SkeletonStats count={6} className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6" label="Loading insights" />}
+      {!isLoading && (
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <StatTile label="Total Farmers" value={String(stats.farmers)} icon={<Users className="h-4 w-4" />} color="border-emerald-100" />
         <StatTile label="Total Customers" value={String(stats.customers)} icon={<Users className="h-4 w-4" />} color="border-blue-100" />
@@ -147,6 +159,7 @@ const AdminInsights: React.FC = () => {
         <StatTile label="Live Auctions" value={String(stats.liveAuctions)} icon={<Gavel className="h-4 w-4" />} color="border-purple-100" />
         <StatTile label="Awaiting Approval" value={String(stats.pendingApprovals)} icon={<Package className="h-4 w-4" />} color="border-red-100" />
       </div>
+      )}
 
       {/* Charts row 1 */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">

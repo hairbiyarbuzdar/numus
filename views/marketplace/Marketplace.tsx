@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import Link from "next/link";
 import { Search, Filter, Gavel, Tag, Star } from 'lucide-react';
 import { formatCurrency } from '../../utils/helpers';
 import { Product } from '../../types';
 import { useProducts } from '../../context/ProductContext';
 import { useWishlist } from '../../context/WishlistContext';
+import { SkeletonTiles } from '../../components/Skeleton';
 
 const ProductCard: React.FC<{ product: Product }> = React.memo(({ product }) => {
   const { addToWishlist, removeFromWishlist, isWishlisted } = useWishlist();
@@ -44,6 +45,11 @@ const ProductCard: React.FC<{ product: Product }> = React.memo(({ product }) => 
               <Tag className="w-3 h-3" /> Wholesale
             </span>
           ) : null}
+          {product.status === 'out_of_stock' && (
+            <span className="bg-gray-900 text-white text-xs font-bold px-2 py-1 rounded-md shadow-sm">
+              Out of Stock
+            </span>
+          )}
         </div>
       </div>
       
@@ -83,9 +89,22 @@ const ProductCard: React.FC<{ product: Product }> = React.memo(({ product }) => 
 });
 
 const Marketplace: React.FC = () => {
-  const { products } = useProducts();
+  const { products, loaded, ensureProducts } = useProducts();
+
+  // The catalogue is fetched when the marketplace opens, not at login.
+  useEffect(() => {
+    void ensureProducts();
+  }, [ensureProducts]);
+
   const visibleProducts = useMemo(
-    () => products.filter((p) => p.approvalStatus === "approved" && p.isActive !== false && p.auctionStatus !== "cancelled"),
+    () =>
+      products.filter(
+        (p) =>
+          p.approvalStatus === "approved" &&
+          p.isActive !== false &&
+          p.auctionStatus !== "cancelled" &&
+          (p.status === undefined || p.status === "active" || p.status === "out_of_stock")
+      ),
     [products]
   );
   const auctions = useMemo(() => visibleProducts.filter((p) => p.isAuction), [visibleProducts]);
@@ -127,8 +146,15 @@ const Marketplace: React.FC = () => {
         </div>
       </div>
 
+      {!loaded && (
+        <section>
+          <div className="mb-6 h-7 w-56 animate-pulse rounded bg-gray-200" aria-hidden="true" />
+          <SkeletonTiles count={8} label="Loading the marketplace" />
+        </section>
+      )}
+
       {/* Live Auctions Section */}
-      {auctions.length > 0 && (
+      {loaded && auctions.length > 0 && (
         <section>
           <div className="flex items-center gap-2 mb-6">
             <Gavel className="w-6 h-6 text-purple-600" />
@@ -142,6 +168,7 @@ const Marketplace: React.FC = () => {
       )}
 
       {/* Wholesale Section */}
+      {loaded && (
       <section>
         <div className="flex items-center gap-2 mb-6">
           <Tag className="w-6 h-6 text-blue-600" />
@@ -151,8 +178,10 @@ const Marketplace: React.FC = () => {
           {wholesale.map(product => <ProductCard key={product.id} product={product} />)}
         </div>
       </section>
+      )}
 
        {/* Featured Retail Section */}
+       {loaded && (
        <section>
         <div className="flex items-center gap-2 mb-6">
           <Star className="w-6 h-6 text-yellow-500" />
@@ -162,6 +191,7 @@ const Marketplace: React.FC = () => {
           {featured.map(product => <ProductCard key={product.id} product={product} />)}
         </div>
       </section>
+       )}
     </div>
   );
 };

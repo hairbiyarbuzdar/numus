@@ -1,10 +1,19 @@
+import { useEffect } from "react";
+import { useRouter } from "next/router";
 import DashboardLayout from "../../layouts/DashboardLayout";
-import DashboardHome from "../../views/dashboard/DashboardHome";
+
+function VendorHomeRedirect() {
+  const router = useRouter();
+  useEffect(() => {
+    void router.replace("/vendor/products");
+  }, [router]);
+  return null;
+}
 
 export default function VendorDashboardPage() {
   return (
     <DashboardLayout requiredRoles={["vendor"]}>
-      <DashboardHome />
+      <VendorHomeRedirect />
     </DashboardLayout>
   );
 }

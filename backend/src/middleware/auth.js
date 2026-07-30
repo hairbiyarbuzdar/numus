@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const pool = require("../db");
 
 const ROLE_MAP = {
   farmer: "vendor",
@@ -45,4 +46,18 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { actorMiddleware, requireRole };
+async function requireApprovedVendor(req, res, next) {
+  try {
+    const { rows } = await pool.query("SELECT vendor_profile_status FROM users WHERE id = $1", [req.actor.userId]);
+    const status = rows[0]?.vendor_profile_status;
+    if (status !== "approved") {
+      return res.status(403).json({ message: "Your vendor profile must be approved by an admin before you can do this." });
+    }
+    next();
+  } catch (err) {
+    console.error("requireApprovedVendor error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+module.exports = { actorMiddleware, requireRole, requireApprovedVendor };

@@ -14,7 +14,12 @@ interface AuthContextType {
     email: string;
     otpCode: string;
   }) => Promise<PasswordSetupRequired>;
-  completePasswordSetup: (transactionId: string, email: string, password: string) => Promise<User>;
+  completePasswordSetup: (
+    transactionId: string,
+    email: string,
+    password: string,
+    options?: { autoLogin?: boolean }
+  ) => Promise<User>;
   loginWithPassword: (email: string, password: string) => Promise<User>;
   logout: () => void;
 }
@@ -48,11 +53,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return authService.verifyEmailOtp(transactionId, email, otpCode);
   };
 
-  const completePasswordSetup = async (transactionId: string, email: string, password: string) => {
+  const completePasswordSetup = async (
+    transactionId: string,
+    email: string,
+    password: string,
+    options?: { autoLogin?: boolean }
+  ) => {
     const { user: nextUser, token } = await authService.setPassword(transactionId, email, password);
-    authService.saveSession(nextUser, token);
-    setUser(nextUser);
-    setAuthModalOpen(false);
+    if (options?.autoLogin !== false) {
+      authService.saveSession(nextUser, token);
+      setUser(nextUser);
+      setAuthModalOpen(false);
+    }
     return nextUser;
   };
 

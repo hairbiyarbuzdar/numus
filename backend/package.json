@@ -8,7 +8,10 @@
     "start": "node src/index.js",
     "migrate": "node src/db/migrate.js",
     "migrate:email": "node src/db/migrate-email-auth.js",
-    "migrate:password": "node src/db/migrate-password-auth.js"
+    "migrate:password": "node src/db/migrate-password-auth.js",
+    "migrate:vendor-profile": "node src/db/migrate-vendor-profile.js",
+    "migrate:product-status": "node src/db/migrate-product-status.js",
+    "migrate:auction-filters": "node src/db/migrate-auction-filters.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

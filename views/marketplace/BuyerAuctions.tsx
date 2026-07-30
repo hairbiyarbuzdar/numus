@@ -1,15 +1,22 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { BellRing, Clock3, Gavel, Trophy } from "lucide-react";
 import { useProducts } from "../../context/ProductContext";
 import { useAuth } from "../../context/AuthContext";
 import { useOrders } from "../../context/OrdersContext";
-import { formatCurrency, getTimeRemaining } from "../../utils/helpers";
+import { formatCurrency, formatDateTime, getTimeRemaining, hasAuctionStarted } from "../../utils/helpers";
+import { SkeletonCards } from "../../components/Skeleton";
 
 const BuyerAuctions: React.FC = () => {
   const { user } = useAuth();
-  const { products, placeBid } = useProducts();
+  const { products, loaded, ensureProducts, placeBid } = useProducts();
   const { notifications, markNotificationRead } = useOrders();
   const [bidDrafts, setBidDrafts] = useState<Record<string, string>>({});
+
+  // Auctions are fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureProducts();
+  }, [ensureProducts]);
+
   const auctions = products.filter(
     (product) =>
       product.isAuction &&
@@ -54,9 +61,18 @@ const BuyerAuctions: React.FC = () => {
         </section>
       )}
 
+      {!loaded && <SkeletonCards count={2} label="Loading live auctions" />}
+
+      {loaded && auctions.length === 0 && (
+        <p className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">
+          No live auctions right now.
+        </p>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {auctions.map((auction) => {
+        {loaded && auctions.map((auction) => {
           const isEnded = auction.auctionStatus === "ended";
+          const isOpen = hasAuctionStarted(auction);
           const timeLeft = auction.auctionEndTime ? getTimeRemaining(auction.auctionEndTime) : null;
           const nextMin = (auction.currentHighestBid || auction.startingPrice || 0) + (auction.bidIncrement || 0);
           return (
@@ -66,8 +82,8 @@ const BuyerAuctions: React.FC = () => {
                   <h3 className="font-bold text-gray-900">{auction.title}</h3>
                   <p className="text-sm text-gray-500">{auction.vendorName}</p>
                 </div>
-                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${isEnded ? "bg-slate-100 text-slate-700" : "bg-purple-100 text-purple-700"}`}>
-                  {isEnded ? "Ended" : "Live"}
+                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${isEnded ? "bg-slate-100 text-slate-700" : !isOpen ? "bg-amber-100 text-amber-700" : "bg-purple-100 text-purple-700"}`}>
+                  {isEnded ? "Ended" : !isOpen ? "Upcoming" : "Live"}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -92,7 +108,14 @@ const BuyerAuctions: React.FC = () => {
                 </div>
               )}
 
-              {!isEnded && (
+              {!isEnded && !isOpen && (
+                <p className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 flex items-center gap-2">
+                  <Clock3 className="w-4 h-4 shrink-0" />
+                  Bidding opens {formatDateTime(auction.auctionStartTime)}.
+                </p>
+              )}
+
+              {!isEnded && isOpen && (
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <input

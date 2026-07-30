@@ -1,19 +1,44 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import { CheckCircle2, XCircle, Clock, Gavel, Package, AlertTriangle, Eye } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Gavel, Package, AlertTriangle, Eye, UserCheck } from "lucide-react";
 import { useProducts } from "../../context/ProductContext";
 import { Product } from "../../types";
 import { formatCurrency } from "../../utils/helpers";
+import AdminVendorApprovalsQueue from "./AdminVendorApprovalsQueue";
+import { SkeletonCards } from "../../components/Skeleton";
 
 type TabKey = "products" | "auctions";
+type MainTabKey = "products" | "vendors";
 
 const AdminApprovalsQueue: React.FC = () => {
   const router = useRouter();
-  const { products, approveProduct, rejectProduct } = useProducts();
+  const { products, loaded: productsLoaded, ensureProducts, approveProduct, rejectProduct } = useProducts();
+  const [mainTab, setMainTab] = useState<MainTabKey>("products");
   const [tab, setTab] = useState<TabKey>("products");
   const [selectedItem, setSelectedItem] = useState<Product | null>(null);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+
+  // Fetched when this queue opens, not at login.
+  useEffect(() => {
+    void ensureProducts();
+  }, [ensureProducts]);
+
+  useEffect(() => {
+    const section = router.query.section;
+    if (section === "products" || section === "vendors") {
+      setMainTab(section);
+    }
+  }, [router.query.section]);
+
+  const handleMainTabChange = (nextTab: MainTabKey) => {
+    setMainTab(nextTab);
+    void router.replace(
+      { pathname: router.pathname, query: { ...router.query, section: nextTab } },
+      undefined,
+      { shallow: true }
+    );
+  };
 
   useEffect(() => {
     const queryTab = router.query.tab;
@@ -23,12 +48,12 @@ const AdminApprovalsQueue: React.FC = () => {
   }, [router.query.tab]);
 
   const pendingProducts = useMemo(
-    () => products.filter((p) => !p.isAuction && p.approvalStatus === "pending"),
+    () => products.filter((p) => !p.isAuction && p.approvalStatus === "pending" && p.status !== "draft"),
     [products]
   );
 
   const pendingAuctions = useMemo(
-    () => products.filter((p) => p.isAuction && p.approvalStatus === "pending"),
+    () => products.filter((p) => p.isAuction && p.approvalStatus === "pending" && p.status !== "draft"),
     [products]
   );
 
@@ -141,6 +166,31 @@ const AdminApprovalsQueue: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      <div className="flex gap-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-fit">
+        <button
+          onClick={() => handleMainTabChange("products")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+            mainTab === "products" ? "bg-slate-900 text-white shadow" : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <Package className="h-4 w-4" />
+          Products
+        </button>
+        <button
+          onClick={() => handleMainTabChange("vendors")}
+          className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+            mainTab === "vendors" ? "bg-slate-900 text-white shadow" : "text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          <UserCheck className="h-4 w-4" />
+          Vendor Profiles
+        </button>
+      </div>
+
+      {mainTab === "vendors" ? (
+        <AdminVendorApprovalsQueue />
+      ) : (
+      <>
       <section className="rounded-2xl border border-amber-200 bg-gradient-to-r from-slate-900 via-amber-950 to-slate-900 p-6 text-white shadow-lg">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/20">
@@ -186,7 +236,9 @@ const AdminApprovalsQueue: React.FC = () => {
         ))}
       </div>
 
-      {currentPending.length > 0 && (
+      {!productsLoaded && <SkeletonCards count={3} className="space-y-3" label="Loading submissions awaiting review" />}
+
+      {productsLoaded && currentPending.length > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
             Awaiting Review ({currentPending.length})
@@ -253,7 +305,7 @@ const AdminApprovalsQueue: React.FC = () => {
         </section>
       )}
 
-      {currentPending.length === 0 && (
+      {productsLoaded && currentPending.length === 0 && (
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-8 text-center">
           <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-emerald-400" />
           <p className="font-semibold text-emerald-800">All caught up</p>
@@ -435,6 +487,8 @@ const AdminApprovalsQueue: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

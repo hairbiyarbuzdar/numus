@@ -1,37 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Building2, CheckCircle2, FileBadge2, Loader2, Warehouse } from "lucide-react";
-import { useAuth } from "../../context/AuthContext";
-import { readLocalStorage, writeLocalStorage } from "../../utils/localStorage";
+import React, { useEffect, useState } from "react";
+import { useRouter } from "next/router";
+import { AlertCircle, Building2, CheckCircle2, FileBadge2, Loader2, Warehouse } from "lucide-react";
+import { vendorProfileService, VendorProfileFormData } from "../../services/vendorProfileService";
+import { VendorProfileStatus } from "../../types";
 
 type TabKey = "cnic" | "bank" | "warehouse";
 type Notice = { type: "error" | "success"; text: string } | null;
 
-interface FarmerProfileForm {
-  cnicFrontImage: string;
-  cnicBackImage: string;
-  cnicNumber: string;
-  cnicName: string;
-  fatherName: string;
-  cnicIssueDate: string;
-  cnicExpiryDate: string;
-  bankWalletName: string;
-  accountTitle: string;
-  accountNumber: string;
-  branchName: string;
-  branchCode: string;
-  registeredMobileNumber: string;
-  warehouseAddress: string;
-  warehouseLocation: string;
-  warehouseInfo: string;
-}
-
-interface StoredFarmerProfile {
-  submitted: boolean;
-  data: FarmerProfileForm;
-  submittedAt?: number;
-}
-
-const emptyForm: FarmerProfileForm = {
+const emptyForm: VendorProfileFormData = {
   cnicFrontImage: "",
   cnicBackImage: "",
   cnicNumber: "",
@@ -69,31 +45,48 @@ const tabs: Array<{ key: TabKey; label: string; icon: React.ReactNode }> = [
   { key: "warehouse", label: "Warehouse Details", icon: <Warehouse className="h-4 w-4" /> },
 ];
 
-const DashboardHome: React.FC = () => {
-  const { user } = useAuth();
+const CompleteProfile: React.FC = () => {
+  const router = useRouter();
+  const [status, setStatus] = useState<VendorProfileStatus>("incomplete");
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [loadingInitial, setLoadingInitial] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("cnic");
-  const [form, setForm] = useState<FarmerProfileForm>(emptyForm);
-  const [errors, setErrors] = useState<Partial<Record<keyof FarmerProfileForm, string>>>({});
+  const [form, setForm] = useState<VendorProfileFormData>(emptyForm);
+  const [errors, setErrors] = useState<Partial<Record<keyof VendorProfileFormData, string>>>({});
   const [notice, setNotice] = useState<Notice>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
-
-  const storageKey = useMemo(() => `numu_farmer_profile_${user?.uid ?? "guest"}`, [user?.uid]);
 
   useEffect(() => {
-    if (!user?.uid) return;
-    const saved = readLocalStorage<StoredFarmerProfile | null>(storageKey, null);
-    if (!saved) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const record = await vendorProfileService.getMine();
+        if (cancelled) return;
+        setStatus(record.status);
+        setRejectionReason(record.rejectionReason || "");
+        if (record.profile) {
+          setForm({ ...emptyForm, ...record.profile });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setNotice({ type: "error", text: err instanceof Error ? err.message : "Could not load profile status." });
+        }
+      } finally {
+        if (!cancelled) setLoadingInitial(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    if (saved.data) {
-      setForm({ ...emptyForm, ...saved.data });
+  useEffect(() => {
+    if (status === "approved") {
+      void router.replace("/vendor/products");
     }
-    if (saved.submitted) {
-      setIsSubmitted(true);
-    }
-  }, [storageKey, user?.uid]);
+  }, [status, router]);
 
-  const requiredFields: Array<keyof FarmerProfileForm> = [
+  const requiredFields: Array<keyof VendorProfileFormData> = [
     "cnicFrontImage",
     "cnicBackImage",
     "cnicNumber",
@@ -105,15 +98,6 @@ const DashboardHome: React.FC = () => {
     "warehouseLocation",
     "warehouseInfo",
   ];
-
-  const persist = (payload: FarmerProfileForm, submitted: boolean) => {
-    const next: StoredFarmerProfile = {
-      submitted,
-      data: payload,
-      submittedAt: submitted ? Date.now() : undefined,
-    };
-    writeLocalStorage(storageKey, next);
-  };
 
   const isValidMonthYear = (value: string) => {
     if (!/^\d{2}\/\d{4}$/.test(value)) return false;
@@ -138,9 +122,9 @@ const DashboardHome: React.FC = () => {
   const isWalletSelection = (value: string) => walletOptions.includes(value);
 
   const validateTab = (tab: TabKey) => {
-    const nextErrors: Partial<Record<keyof FarmerProfileForm, string>> = { ...errors };
+    const nextErrors: Partial<Record<keyof VendorProfileFormData, string>> = { ...errors };
 
-    const validateField = (field: keyof FarmerProfileForm, message: string) => {
+    const validateField = (field: keyof VendorProfileFormData, message: string) => {
       if (!form[field].trim()) nextErrors[field] = message;
       else delete nextErrors[field];
     };
@@ -195,7 +179,7 @@ const DashboardHome: React.FC = () => {
 
     setErrors(nextErrors);
     return !Object.keys(nextErrors).some((key) => {
-      const field = key as keyof FarmerProfileForm;
+      const field = key as keyof VendorProfileFormData;
       if (tab === "cnic") return ["cnicFrontImage", "cnicBackImage", "cnicNumber", "cnicName", "fatherName", "cnicIssueDate", "cnicExpiryDate"].includes(field);
       if (tab === "bank") {
         return ["bankWalletName", "accountTitle", "accountNumber", "branchName", "branchCode", "registeredMobileNumber"].includes(field);
@@ -205,7 +189,7 @@ const DashboardHome: React.FC = () => {
   };
 
   const validateAll = () => {
-    const nextErrors: Partial<Record<keyof FarmerProfileForm, string>> = {};
+    const nextErrors: Partial<Record<keyof VendorProfileFormData, string>> = {};
 
     requiredFields.forEach((field) => {
       if (!form[field].trim()) {
@@ -250,6 +234,32 @@ const DashboardHome: React.FC = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
+  const isFormValid = (() => {
+    if (requiredFields.some((field) => !form[field].trim())) return false;
+
+    if (!/^\d{5}-\d{7}-\d{1}$/.test(form.cnicNumber.trim())) return false;
+    if (!isValidMonthYear(form.cnicIssueDate.trim())) return false;
+    if (!isValidMonthYear(form.cnicExpiryDate.trim())) return false;
+
+    if (!form.bankWalletName.trim()) return false;
+
+    if (isBankSelection(form.bankWalletName)) {
+      if (!form.branchName.trim() || !form.branchCode.trim() || !form.accountTitle.trim() || !form.accountNumber.trim()) {
+        return false;
+      }
+      if (!/^\d{8,24}$/.test(form.accountNumber.trim())) return false;
+    }
+
+    if (isWalletSelection(form.bankWalletName)) {
+      if (!form.registeredMobileNumber.trim()) return false;
+      if (!/^\d{10,15}$/.test(form.registeredMobileNumber.trim())) return false;
+    }
+
+    if (!isBankSelection(form.bankWalletName) && !isWalletSelection(form.bankWalletName)) return false;
+
+    return true;
+  })();
+
   const handleImageUpload = (field: "cnicFrontImage" | "cnicBackImage", file?: File) => {
     if (!file) return;
 
@@ -261,11 +271,7 @@ const DashboardHome: React.FC = () => {
     const reader = new FileReader();
     reader.onload = () => {
       const value = String(reader.result);
-      setForm((prev) => {
-        const next = { ...prev, [field]: value };
-        persist(next, false);
-        return next;
-      });
+      setForm((prev) => ({ ...prev, [field]: value }));
       setErrors((prev) => {
         const next = { ...prev };
         delete next[field];
@@ -275,15 +281,8 @@ const DashboardHome: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const updateField = (field: keyof FarmerProfileForm, value: string) => {
-    if (isSubmitted) return;
-
-    setForm((prev) => {
-      const next = { ...prev, [field]: value };
-      persist(next, false);
-      return next;
-    });
-
+  const updateField = (field: keyof VendorProfileFormData, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => {
       const next = { ...prev };
       delete next[field];
@@ -292,17 +291,12 @@ const DashboardHome: React.FC = () => {
   };
 
   const updateMonthYearField = (field: "cnicIssueDate" | "cnicExpiryDate", value: string) => {
-    if (isSubmitted) return;
-
     setForm((prev) => {
       const previousValue = prev[field];
       const masked = formatMonthYearInput(value);
       const nextValue = masked || (value === "" ? "" : previousValue);
-      const next = { ...prev, [field]: nextValue };
-      persist(next, false);
-      return next;
+      return { ...prev, [field]: nextValue };
     });
-
     setErrors((prev) => {
       const next = { ...prev };
       delete next[field];
@@ -333,21 +327,32 @@ const DashboardHome: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    await new Promise((resolve) => setTimeout(resolve, 900));
-
-    persist(form, true);
-    setIsSubmitted(true);
-    setIsSubmitting(false);
-    setNotice({ type: "success", text: "Profile submitted successfully." });
+    try {
+      const record = await vendorProfileService.submit(form);
+      setStatus(record.status);
+      setNotice({ type: "success", text: "Profile submitted successfully." });
+    } catch (err) {
+      setNotice({ type: "error", text: err instanceof Error ? err.message : "Could not submit profile." });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  if (isSubmitted) {
+  if (loadingInitial) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  if (status === "pending") {
     return (
       <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-emerald-100 bg-white p-10 text-center shadow-sm">
         <div>
           <CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" />
           <h1 className="mt-4 text-2xl font-bold text-gray-900">Profile Under Review</h1>
-          <p className="mt-2 text-gray-600">You will receive an email soon.</p>
+          <p className="mt-2 text-gray-600">An admin will review your submission soon. You'll be notified once it's approved.</p>
         </div>
       </div>
     );
@@ -356,9 +361,20 @@ const DashboardHome: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Farmer Profile Setup</h1>
-        <p className="text-sm text-gray-500">Complete all tabs to submit your account details.</p>
+        <h1 className="text-2xl font-bold text-gray-900">Complete Your Vendor Profile</h1>
+        <p className="text-sm text-gray-500">Complete all tabs and submit for admin approval before you can add products.</p>
       </div>
+
+      {status === "rejected" && (
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Your profile was rejected.</p>
+            {rejectionReason && <p className="mt-1">{rejectionReason}</p>}
+            <p className="mt-1">Please review the details below and resubmit.</p>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-100 p-3 sm:p-4">
@@ -482,19 +498,15 @@ const DashboardHome: React.FC = () => {
                     value={form.bankWalletName}
                     onChange={(e) => {
                       const value = e.target.value;
-                      setForm((prev) => {
-                        const next = {
-                          ...prev,
-                          bankWalletName: value,
-                          branchName: "",
-                          branchCode: "",
-                          accountTitle: "",
-                          accountNumber: "",
-                          registeredMobileNumber: "",
-                        };
-                        persist(next, false);
-                        return next;
-                      });
+                      setForm((prev) => ({
+                        ...prev,
+                        bankWalletName: value,
+                        branchName: "",
+                        branchCode: "",
+                        accountTitle: "",
+                        accountNumber: "",
+                        registeredMobileNumber: "",
+                      }));
                       setErrors((prev) => {
                         const next = { ...prev };
                         delete next.bankWalletName;
@@ -650,9 +662,10 @@ const DashboardHome: React.FC = () => {
 
             <button
               type="button"
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+              onClick={() => void handleSubmit()}
+              disabled={isSubmitting || !isFormValid}
+              title={!isFormValid ? "Complete all required fields to submit." : undefined}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {isSubmitting ? "Submitting..." : "Submit Profile"}
@@ -670,4 +683,4 @@ const DashboardHome: React.FC = () => {
   );
 };
 
-export default DashboardHome;
+export default CompleteProfile;

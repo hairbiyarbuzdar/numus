@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { Bell, UserPlus, Package, ShoppingCart, Gavel, CheckCheck, Filter } from "lucide-react";
+import { SkeletonLines } from "../../components/Skeleton";
 import { useUsers } from "../../context/UsersContext";
 import { useProducts } from "../../context/ProductContext";
 import { useOrders } from "../../context/OrdersContext";
@@ -33,9 +34,17 @@ const timeAgo = (ts: number) => {
 
 const AdminNotificationsCenter: React.FC = () => {
   const router = useRouter();
-  const { users } = useUsers();
-  const { products } = useProducts();
+  const { users, loaded: usersLoaded, ensureUsers } = useUsers();
+  const { products, loaded: productsLoaded, ensureProducts } = useProducts();
   const { orders, notifications: userNotifications, markNotificationRead } = useOrders();
+
+  // The feed is derived from users + products, so it asks for them on open.
+  useEffect(() => {
+    void ensureUsers();
+    void ensureProducts();
+  }, [ensureProducts, ensureUsers]);
+
+  const isLoading = !usersLoaded || !productsLoaded;
   const [filter, setFilter] = useState<NotifType>("all");
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
 
@@ -203,7 +212,11 @@ const AdminNotificationsCenter: React.FC = () => {
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {isLoading ? (
+        <div className="rounded-2xl border border-slate-100 bg-white p-5">
+          <SkeletonLines lines={6} label="Loading notifications" />
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-slate-100 bg-white p-10 text-center">
           <Bell className="mx-auto mb-3 h-10 w-10 text-slate-200" />
           <p className="font-semibold text-slate-400">No notifications in this category</p>

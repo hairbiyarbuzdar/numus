@@ -17,6 +17,7 @@ import {
   Clock,
   TrendingUp,
   Bell,
+  FileBadge2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -49,6 +50,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           { name: 'Settings', path: '/admin/settings', icon: Settings },
         ];
       case 'vendor':
+        if (user?.vendorProfileStatus !== 'approved') {
+          return [
+            { name: 'Complete Profile', path: '/vendor/complete-profile', icon: FileBadge2 },
+          ];
+        }
         return [
           { name: 'Dashboard', path: '/vendor', icon: LayoutDashboard },
           { name: 'My Products', path: '/vendor/products', icon: Package },

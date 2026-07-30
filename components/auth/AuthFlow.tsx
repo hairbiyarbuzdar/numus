@@ -19,7 +19,7 @@ const sanitizeName = (value: string) => value.replace(/[^A-Za-z\s]/g, "").slice(
 
 const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
   const router = useRouter();
-  const { loading, requestOtp, verifyOtp, completePasswordSetup } = useAuth();
+  const { requestOtp, verifyOtp, completePasswordSetup } = useAuth();
 
   const [registerType, setRegisterType] = useState<RegisterType>("farmer");
   const [name, setName] = useState("");
@@ -29,6 +29,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
   const [transactionId, setTransactionId] = useState("");
   const [step, setStep] = useState<Step>("form");
   const [notice, setNotice] = useState<Notice>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const canSendOtp = !!name.trim() && isValidEmail;
@@ -41,15 +42,9 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
     }
   }, [router.isReady, router.query.type]);
 
-  const redirectByRole = async (role: string) => {
-    if (role === "superAdmin") await router.push("/admin");
-    else if (role === "vendor") await router.push("/vendor");
-    else await router.push("/buyer");
-    onSuccess?.();
-  };
-
   const handleSendOtp = async () => {
     setNotice(null);
+    if (submitting) return;
     if (!name.trim()) {
       setNotice({ type: "error", text: "Full name is required." });
       return;
@@ -58,6 +53,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
       setNotice({ type: "error", text: "Enter a valid email address." });
       return;
     }
+    setSubmitting(true);
     try {
       const result = await requestOtp(email.trim(), registerType);
       setTransactionId(result.transactionId);
@@ -66,16 +62,20 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
       setNotice({ type: "success", text: "OTP sent to your email. Check your inbox." });
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to send OTP." });
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleVerify = async (event: React.FormEvent) => {
     event.preventDefault();
     setNotice(null);
+    if (submitting) return;
     if (!/^\d{6}$/.test(otpCode)) {
       setNotice({ type: "error", text: "OTP must be exactly 6 digits." });
       return;
     }
+    setSubmitting(true);
     try {
       const result = await verifyOtp({ transactionId, email: email.trim(), otpCode });
       setTransactionId(result.transactionId);
@@ -83,15 +83,22 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
       setNotice(null);
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "OTP verification failed." });
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleSetPassword = async (password: string) => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
-      const nextUser = await completePasswordSetup(transactionId, email.trim(), password);
-      await redirectByRole(nextUser.role);
+      await completePasswordSetup(transactionId, email.trim(), password, { autoLogin: false });
+      await router.push(`/login?type=${registerType}&registered=1`);
+      onSuccess?.();
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Could not set password." });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -141,7 +148,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
             <input
               value={name}
               onChange={(e) => setName(sanitizeName(e.target.value))}
-              disabled={loading}
+              disabled={submitting}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
               placeholder="Enter your full name"
               maxLength={30}
@@ -174,17 +181,17 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                disabled={loading}
+                disabled={submitting}
                 className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-28 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
                 placeholder="you@example.com"
               />
               <button
                 type="button"
                 onClick={() => void handleSendOtp()}
-                disabled={loading || !canSendOtp}
+                disabled={submitting || !canSendOtp}
                 className="absolute right-1.5 top-1.5 inline-flex h-8 items-center justify-center rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Send OTP"}
+                {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Send OTP"}
               </button>
             </div>
           </div>
@@ -206,7 +213,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
               <button
                 type="button"
                 onClick={() => { setStep("form"); setOtpCode(""); setNotice(null); }}
-                disabled={loading}
+                disabled={submitting}
                 className="text-xs font-medium text-emerald-700 hover:underline"
               >
                 Change email
@@ -220,17 +227,17 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               inputMode="numeric"
               maxLength={6}
-              disabled={loading}
+              disabled={submitting}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 tracking-[0.35em] focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
               placeholder="000000"
             />
             <button
               type="submit"
-              disabled={loading}
+              disabled={submitting}
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              {loading ? "Verifying..." : "Verify Code"}
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {submitting ? "Verifying..." : "Verify Code"}
             </button>
           </div>
         </form>
@@ -239,7 +246,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
       {step === "password" && (
         <SetPasswordStep
           email={email.trim()}
-          loading={loading}
+          loading={submitting}
           submitLabel="Create Account"
           onSubmit={handleSetPassword}
           setNotice={setNotice}

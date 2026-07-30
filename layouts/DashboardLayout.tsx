@@ -35,6 +35,15 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, requiredRol
     if (requiredRoles && !requiredRoles.includes(user.role)) {
       const fallbackPath = user.role === "superAdmin" ? "/admin" : `/${user.role}`;
       void router.replace(fallbackPath);
+      return;
+    }
+
+    if (
+      user.role === "vendor" &&
+      user.vendorProfileStatus !== "approved" &&
+      router.pathname !== "/vendor/complete-profile"
+    ) {
+      void router.replace("/vendor/complete-profile");
     }
   }, [loading, mounted, requiredRoles, router, user]);
 
@@ -48,6 +57,13 @@ const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children, requiredRol
 
   if (!user) return null;
   if (requiredRoles && !requiredRoles.includes(user.role)) return null;
+  if (
+    user.role === "vendor" &&
+    user.vendorProfileStatus !== "approved" &&
+    router.pathname !== "/vendor/complete-profile"
+  ) {
+    return null;
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">

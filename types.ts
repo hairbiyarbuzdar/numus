@@ -2,22 +2,26 @@ import React from 'react';
 
 export type Role = 'superAdmin' | 'vendor' | 'buyer';
 
+export type VendorProfileStatus = 'incomplete' | 'pending' | 'approved' | 'rejected';
+
 export interface User {
   uid: string;
   email: string;
   displayName: string;
   role: Role;
   photoURL?: string;
-  verified?: boolean; // Vendor verification
+  verified?: boolean; // Email/OTP verification, not vendor approval
   city?: string;
   phoneNumber?: string;
   userType?: "farmer" | "customer" | "admin";
   isActive?: boolean;
+  vendorProfileStatus?: VendorProfileStatus;
   createdAt?: number;
 }
 
 export type ProductType = 'retail' | 'wholesale' | 'auction';
 export type ProductApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type ProductStatus = 'draft' | 'active' | 'out_of_stock' | 'inactive' | 'archived';
 
 export interface BulkTier {
   qty: number;
@@ -63,6 +67,7 @@ export interface Product {
   winnerBidderName?: string;
   winnerOrderId?: string;
   isActive?: boolean;
+  status?: ProductStatus;
   approvalStatus?: ProductApprovalStatus;
   isApproved?: boolean;
   createdAt?: number;

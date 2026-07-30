@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { Product } from "../types";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Product, ProductStatus } from "../types";
 import { useAuth } from "./AuthContext";
-import { productApi } from "../services/productApi";
+import { UpdateAuctionPayload, productApi } from "../services/productApi";
+import { createLazyFetch } from "../utils/lazyFetch";
 
 interface CreateProductPayload {
   vendorId: string;
@@ -14,6 +15,7 @@ interface CreateProductPayload {
   basePrice: number;
   stock: number;
   minOrderQty: number;
+  status?: ProductStatus;
 }
 
 interface CreateAuctionPayload {
@@ -42,14 +44,20 @@ interface PlaceBidPayload {
 interface ProductContextType {
   products: Product[];
   loading: boolean;
+  /** True once a fetch has completed for the current user — the cache is warm. */
+  loaded: boolean;
   error: string | null;
+  /** Loads the list if it isn't cached yet. Call this from a module that needs it. */
+  ensureProducts: () => Promise<void>;
+  /** Forces a refetch, cached or not. */
   refreshProducts: () => Promise<void>;
   addProduct: (payload: CreateProductPayload) => Promise<Product>;
   addAuction: (payload: CreateAuctionPayload) => Promise<Product>;
+  updateAuction: (productId: string, payload: UpdateAuctionPayload) => Promise<Product>;
   deleteProduct: (productId: string) => Promise<void>;
   updateProduct: (
     productId: string,
-    payload: Partial<Pick<Product, "title" | "description" | "category" | "basePrice" | "stock" | "minOrderQty" | "images">>
+    payload: Partial<Pick<Product, "title" | "description" | "category" | "basePrice" | "stock" | "minOrderQty" | "images" | "status">>
   ) => Promise<Product>;
   setProductActive: (productId: string, isActive: boolean) => Promise<Product>;
   approveProduct: (productId: string) => Promise<Product>;
@@ -86,7 +94,8 @@ const mergeProducts = (products: Product[], nextProducts: Product[]) => {
 export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const actor = useMemo(
@@ -98,21 +107,43 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     [user]
   );
 
-  const refreshProducts = async () => {
+  // Nothing is fetched until a module asks for it — see utils/lazyFetch.ts for
+  // the caching and request-collapsing rules.
+  const cacheRef = useRef(createLazyFetch());
+
+  const fetchProducts = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
       const nextProducts = await productApi.listProducts(actor);
       setProducts(nextProducts);
+      setLoaded(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load products.");
+      // Rethrow so the cache stays cold and the next attempt retries.
+      throw err;
     } finally {
       setLoading(false);
     }
-  };
+  }, [actor]);
 
+  const refreshProducts = useCallback(
+    () => cacheRef.current.run(fetchProducts).catch(() => undefined),
+    [fetchProducts]
+  );
+
+  const ensureProducts = useCallback(
+    () => cacheRef.current.ensure(fetchProducts).catch(() => undefined),
+    [fetchProducts]
+  );
+
+  // Signing in or out invalidates the cache: the API scopes products to the
+  // caller, so another user's list must never be reused.
   useEffect(() => {
-    void refreshProducts();
+    cacheRef.current.invalidate();
+    setProducts([]);
+    setLoaded(false);
+    setError(null);
   }, [user?.uid]);
 
   const addProduct = async (payload: CreateProductPayload) => {
@@ -129,6 +160,13 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return createdAuction;
   };
 
+  const updateAuction = async (productId: string, payload: UpdateAuctionPayload) => {
+    const updatedAuction = await productApi.updateAuction(productId, payload, actor);
+    setProducts((prev) => upsertProduct(prev, updatedAuction));
+    setError(null);
+    return updatedAuction;
+  };
+
   const deleteProduct = async (productId: string) => {
     await productApi.deleteProduct(productId, actor);
     setProducts((prev) => prev.filter((product) => product.id !== productId));
@@ -137,7 +175,7 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const updateProduct = async (
     productId: string,
-    payload: Partial<Pick<Product, "title" | "description" | "category" | "basePrice" | "stock" | "minOrderQty" | "images">>
+    payload: Partial<Pick<Product, "title" | "description" | "category" | "basePrice" | "stock" | "minOrderQty" | "images" | "status">>
   ) => {
     const updatedProduct = await productApi.updateProduct(productId, payload, actor);
     setProducts((prev) => upsertProduct(prev, updatedProduct));
@@ -246,10 +284,13 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         products,
         loading,
+        loaded,
         error,
+        ensureProducts,
         refreshProducts,
         addProduct,
         addAuction,
+        updateAuction,
         deleteProduct,
         updateProduct,
         setProductActive,

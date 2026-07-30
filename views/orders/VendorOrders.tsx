@@ -2,12 +2,13 @@ import React from "react";
 import { useAuth } from "../../context/AuthContext";
 import { OrderStatus, useOrders } from "../../context/OrdersContext";
 import { formatCurrency } from "../../utils/helpers";
+import { SkeletonCards } from "../../components/Skeleton";
 
 const ORDER_STATUS_OPTIONS: OrderStatus[] = ["Pending", "Confirmed", "Processing", "Shipped", "Delivered", "Cancelled"];
 
 const VendorOrders: React.FC = () => {
   const { user } = useAuth();
-  const { orders, updateOrderStatus } = useOrders();
+  const { orders, loaded, updateOrderStatus } = useOrders();
 
   const incoming = orders
     .filter((order) => order.items.some((item) => item.vendorId === user?.uid))
@@ -19,8 +20,9 @@ const VendorOrders: React.FC = () => {
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-900">Incoming Orders</h1>
-      {incoming.length === 0 && <p className="text-gray-500">No incoming orders yet.</p>}
-      {incoming.map((order) => {
+      {!loaded && <SkeletonCards count={2} className="space-y-4" label="Loading incoming orders" />}
+      {loaded && incoming.length === 0 && <p className="text-gray-500">No incoming orders yet.</p>}
+      {loaded && incoming.map((order) => {
         const vendorTotal = order.vendorItems.reduce((acc, item) => acc + item.price * item.qty, 0);
         return (
           <article key={order.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">

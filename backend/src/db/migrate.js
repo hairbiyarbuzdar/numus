@@ -111,6 +111,16 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_products_vendor_id      ON products(vendor_id);
 CREATE INDEX IF NOT EXISTS idx_products_approval_status ON products(approval_status);
 CREATE INDEX IF NOT EXISTS idx_products_product_type    ON products(product_type);
+CREATE INDEX IF NOT EXISTS idx_products_category         ON products(category);
+-- Backs the vendor "My Products" listing: filter by vendor, sort by newest.
+CREATE INDEX IF NOT EXISTS idx_products_vendor_created   ON products(vendor_id, created_at DESC);
+-- Back the admin Auctions listing: scope by type + default newest sort, then the
+-- status and date-range filters. Partial so they stay small on a catalogue that
+-- is mostly retail rows.
+CREATE INDEX IF NOT EXISTS idx_products_type_created     ON products(product_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_products_auction_state    ON products(approval_status, auction_status) WHERE is_auction;
+CREATE INDEX IF NOT EXISTS idx_products_auction_start    ON products(auction_start_time) WHERE is_auction;
+CREATE INDEX IF NOT EXISTS idx_products_auction_end      ON products(auction_end_time) WHERE is_auction;
 CREATE INDEX IF NOT EXISTS idx_bids_product_id          ON bids(product_id);
 CREATE INDEX IF NOT EXISTS idx_orders_customer_id       ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_id    ON notifications(user_id);

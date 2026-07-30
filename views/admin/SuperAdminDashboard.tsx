@@ -1,9 +1,10 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { BarChart3, Gavel, Package, ShoppingCart, Store, Users } from "lucide-react";
 import { useUsers } from "../../context/UsersContext";
 import { useProducts } from "../../context/ProductContext";
 import { useOrders } from "../../context/OrdersContext";
-import { formatCurrency } from "../../utils/helpers";
+import { AUCTION_STATUS_LABELS, formatCurrency, getAuctionDisplayStatus } from "../../utils/helpers";
+import { SkeletonLines, SkeletonStats } from "../../components/Skeleton";
 
 const StatCard: React.FC<{ title: string; value: string; detail: string; icon: React.ReactNode }> = ({ title, value, detail, icon }) => (
   <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -17,15 +18,27 @@ const StatCard: React.FC<{ title: string; value: string; detail: string; icon: R
 );
 
 const SuperAdminDashboard: React.FC = () => {
-  const { users } = useUsers();
-  const { products } = useProducts();
+  const { users, loaded: usersLoaded, ensureUsers } = useUsers();
+  const { products, loaded: productsLoaded, ensureProducts } = useProducts();
   const { orders } = useOrders();
+
+  // This dashboard is the one place that genuinely needs both lists, so it asks
+  // for them on open rather than having them fetched at login.
+  useEffect(() => {
+    void ensureUsers();
+    void ensureProducts();
+  }, [ensureProducts, ensureUsers]);
+
+  const isLoading = !usersLoaded || !productsLoaded;
 
   const stats = useMemo(() => {
     const appUsers = users.filter((user) => user.userType !== "admin");
     const farmers = appUsers.filter((user) => user.userType === "farmer");
     const customers = appUsers.filter((user) => user.userType === "customer");
-    const activeAuctions = products.filter((product) => product.isAuction && product.auctionStatus === "live");
+    // "Active" means approved and running — a pending auction is not yet live.
+    const activeAuctions = products.filter(
+      (product) => product.isAuction && getAuctionDisplayStatus(product) === "active"
+    );
     const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
     return {
       totalUsers: appUsers.length,
@@ -56,6 +69,9 @@ const SuperAdminDashboard: React.FC = () => {
         <p className="mt-2 max-w-3xl text-sm text-cyan-50">Live overview of users, products, auctions, orders, and revenue.</p>
       </section>
 
+      {isLoading && <SkeletonStats count={7} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" label="Loading platform statistics" />}
+
+      {!isLoading && (
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Total Users" value={String(stats.totalUsers)} detail="Farmers + Customers" icon={<Users className="h-5 w-5" />} />
         <StatCard title="Total Farmers" value={String(stats.totalFarmers)} detail="Registered farmer accounts" icon={<Store className="h-5 w-5" />} />
@@ -65,19 +81,21 @@ const SuperAdminDashboard: React.FC = () => {
         <StatCard title="Total Orders" value={String(stats.totalOrders)} detail="Checkout and auction orders" icon={<ShoppingCart className="h-5 w-5" />} />
         <StatCard title="Total Revenue" value={formatCurrency(stats.totalRevenue)} detail="Aggregate order value" icon={<BarChart3 className="h-5 w-5" />} />
       </section>
+      )}
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-base font-semibold text-slate-900">Recent Users</h3>
           <div className="mt-4 space-y-2">
-            {recentUsers.map((user) => (
+            {!usersLoaded && <SkeletonLines lines={4} label="Loading recent users" />}
+            {usersLoaded && recentUsers.map((user) => (
               <div key={user.uid} className="rounded-lg border border-slate-100 px-3 py-2 text-sm">
                 <p className="font-semibold text-slate-800">{user.displayName}</p>
                 <p className="text-xs text-slate-500">{user.phoneNumber} | {user.city}</p>
                 <p className="text-xs text-slate-500">{new Date(user.createdAt).toLocaleString()}</p>
               </div>
             ))}
-            {recentUsers.length === 0 && <p className="text-sm text-slate-500">No user activity.</p>}
+            {usersLoaded && recentUsers.length === 0 && <p className="text-sm text-slate-500">No user activity.</p>}
           </div>
         </div>
 
@@ -98,16 +116,17 @@ const SuperAdminDashboard: React.FC = () => {
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-base font-semibold text-slate-900">Recent Auctions</h3>
           <div className="mt-4 space-y-2">
-            {recentAuctions.map((auction) => (
+            {!productsLoaded && <SkeletonLines lines={4} label="Loading recent auctions" />}
+            {productsLoaded && recentAuctions.map((auction) => (
               <div key={auction.id} className="rounded-lg border border-slate-100 px-3 py-2 text-sm">
                 <p className="font-semibold text-slate-800">{auction.title}</p>
                 <p className="text-xs text-slate-500">{auction.vendorName}</p>
                 <p className="text-xs text-slate-500">
-                  {(auction.auctionStatus || "live").toUpperCase()} | Highest {formatCurrency(auction.currentHighestBid || auction.startingPrice || 0)}
+                  {AUCTION_STATUS_LABELS[getAuctionDisplayStatus(auction)].toUpperCase()} | Highest {formatCurrency(auction.currentHighestBid || auction.startingPrice || 0)}
                 </p>
               </div>
             ))}
-            {recentAuctions.length === 0 && <p className="text-sm text-slate-500">No auction activity.</p>}
+            {productsLoaded && recentAuctions.length === 0 && <p className="text-sm text-slate-500">No auction activity.</p>}
           </div>
         </div>
       </section>

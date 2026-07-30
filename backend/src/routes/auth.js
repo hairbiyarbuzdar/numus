@@ -157,6 +157,7 @@ function rowToUser(row) {
     photoURL: row.photo_url || "",
     isActive: row.is_active,
     verified: row.verified,
+    vendorProfileStatus: row.vendor_profile_status || undefined,
     createdAt: parseInt(row.created_at),
   };
 }

@@ -27,6 +27,7 @@ app.use("/api/products",      require("./routes/products"));
 app.use("/api/orders",        require("./routes/orders"));
 app.use("/api/notifications", require("./routes/notifications"));
 app.use("/api/auth",          require("./routes/auth"));
+app.use("/api/vendor-profile", require("./routes/vendorProfile"));
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok", ts: Date.now() }));

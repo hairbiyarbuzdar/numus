@@ -62,6 +62,13 @@ interface CreateCheckoutOrderPayload {
 interface OrdersContextType {
   orders: OrderRecord[];
   notifications: AppNotification[];
+  /**
+   * False until the stored orders have been read. Orders still live in
+   * localStorage rather than the backend `/orders` API, so this settles on the
+   * first client render — modules use it to show a loading state consistently
+   * with the API-backed ones. See CHANGES.md #18.
+   */
+  loaded: boolean;
   createCheckoutOrder: (payload: CreateCheckoutOrderPayload) => string;
   updateOrderStatus: (orderId: string, status: OrderStatus) => void;
   markNotificationRead: (notificationId: string) => void;
@@ -232,11 +239,12 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     () => ({
       orders,
       notifications,
+      loaded: hydrated,
       createCheckoutOrder,
       updateOrderStatus,
       markNotificationRead,
     }),
-    [notifications, orders]
+    [hydrated, notifications, orders]
   );
 
   return <OrdersContext.Provider value={value}>{children}</OrdersContext.Provider>;

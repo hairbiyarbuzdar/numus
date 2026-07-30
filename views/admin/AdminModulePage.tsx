@@ -1,13 +1,16 @@
 import React from "react";
+import { SkeletonTableRows } from "../../components/Skeleton";
 
 interface AdminModulePageProps {
   title: string;
   subtitle: string;
   columns: string[];
   rows: string[][];
+  /** Set while the module is still fetching, to swap the rows for a skeleton. */
+  loading?: boolean;
 }
 
-const AdminModulePage: React.FC<AdminModulePageProps> = ({ title, subtitle, columns, rows }) => {
+const AdminModulePage: React.FC<AdminModulePageProps> = ({ title, subtitle, columns, rows, loading = false }) => {
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-900 to-cyan-900 p-6 text-white shadow-lg">
@@ -28,7 +31,8 @@ const AdminModulePage: React.FC<AdminModulePageProps> = ({ title, subtitle, colu
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, rowIndex) => (
+              {loading && <SkeletonTableRows rows={5} columns={columns.length} label={`Loading ${title}`} />}
+              {!loading && rows.map((row, rowIndex) => (
                 <tr key={`${title}-${rowIndex}`} className="border-t border-slate-100">
                   {row.map((value, valueIndex) => (
                     <td key={`${title}-${rowIndex}-${valueIndex}`} className="px-4 py-3 text-slate-600">

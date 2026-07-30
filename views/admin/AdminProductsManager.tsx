@@ -1,11 +1,19 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Eye, EyeOff, Pencil, Search, Trash2, XCircle } from "lucide-react";
 import ConfirmModal from "../../components/ConfirmModal";
 import { useProducts } from "../../context/ProductContext";
 import { formatCurrency } from "../../utils/helpers";
+import { SkeletonTableRows } from "../../components/Skeleton";
 
 const AdminProductsManager: React.FC = () => {
-  const { products, deleteProduct, setProductActive, approveProduct, rejectProduct, updateProduct } = useProducts();
+  const { products, loaded, ensureProducts, deleteProduct, setProductActive, approveProduct, rejectProduct, updateProduct } =
+    useProducts();
+
+  // Fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureProducts();
+  }, [ensureProducts]);
+
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -27,7 +35,10 @@ const AdminProductsManager: React.FC = () => {
       const moderationStatus = product.approvalStatus || "approved";
       const visibilityStatus = product.isActive === false ? "inactive" : "active";
       const matchesStatus =
-        statusFilter === "all" || statusFilter === moderationStatus || statusFilter === visibilityStatus;
+        statusFilter === "all" ||
+        statusFilter === moderationStatus ||
+        statusFilter === visibilityStatus ||
+        statusFilter === product.status;
       return matchesQuery && matchesCategory && matchesVendor && matchesStatus;
     });
   }, [category, products, query, statusFilter, vendorFilter]);
@@ -69,6 +80,9 @@ const AdminProductsManager: React.FC = () => {
             <option value="rejected">Rejected</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
+            <option value="draft">Draft</option>
+            <option value="out_of_stock">Out of Stock</option>
+            <option value="archived">Archived</option>
           </select>
         </div>
       </section>
@@ -86,7 +100,8 @@ const AdminProductsManager: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((product) => (
+            {!loaded && <SkeletonTableRows rows={5} columns={6} label="Loading products" />}
+            {loaded && filtered.map((product) => (
               <tr key={product.id} className="border-t border-slate-100">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
@@ -118,6 +133,21 @@ const AdminProductsManager: React.FC = () => {
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${product.isActive === false ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"}`}>
                       {product.isActive === false ? "Hidden" : "Visible"}
                     </span>
+                    {product.status && (
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        product.status === "draft"
+                          ? "bg-gray-100 text-gray-600"
+                          : product.status === "out_of_stock"
+                          ? "bg-orange-100 text-orange-700"
+                          : product.status === "inactive"
+                          ? "bg-gray-100 text-gray-600"
+                          : product.status === "archived"
+                          ? "bg-slate-200 text-slate-600"
+                          : "bg-emerald-100 text-emerald-700"
+                      }`}>
+                        {product.status === "out_of_stock" ? "Out of Stock" : product.status.charAt(0).toUpperCase() + product.status.slice(1)}
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="px-4 py-3">
@@ -170,7 +200,7 @@ const AdminProductsManager: React.FC = () => {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {loaded && filtered.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-slate-500">No products found.</td>
               </tr>

@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Edit3, Search, ShieldCheck, ShieldOff, Trash2, UserRound } from "lucide-react";
 import ConfirmModal from "../../components/ConfirmModal";
+import { SkeletonTableRows } from "../../components/Skeleton";
 import { useUsers } from "../../context/UsersContext";
 import { useProducts } from "../../context/ProductContext";
 import { User } from "../../types";
@@ -16,8 +17,13 @@ const userTypeLabel = (type: User["userType"]) => {
 };
 
 const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({ defaultType = "all" }) => {
-  const { users, setUserActive, deleteUser, updateUser } = useUsers();
+  const { users, loaded, ensureUsers, setUserActive, deleteUser, updateUser } = useUsers();
   const { setVendorListingsVisibility } = useProducts();
+
+  // Fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureUsers();
+  }, [ensureUsers]);
   const [query, setQuery] = useState("");
   const [userType, setUserType] = useState<"all" | "farmer" | "customer">(defaultType);
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
@@ -77,7 +83,8 @@ const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({ defaultType = "al
             </tr>
           </thead>
           <tbody>
-            {filtered.map((user) => (
+            {!loaded && <SkeletonTableRows rows={5} columns={7} label="Loading users" />}
+            {loaded && filtered.map((user) => (
               <tr key={user.uid} className="border-t border-slate-100">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
@@ -143,7 +150,7 @@ const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({ defaultType = "al
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {loaded && filtered.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-4 py-10 text-center text-slate-500">No users found.</td>
               </tr>

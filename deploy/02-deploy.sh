@@ -24,7 +24,17 @@ echo "==> Installing backend dependencies"
 ( cd backend && npm ci --omit=dev )
 
 echo "==> Running database migrations"
-( cd backend && npm run migrate && npm run migrate:email )
+# Every migration is idempotent (CREATE ... IF NOT EXISTS / ADD COLUMN IF NOT
+# EXISTS), so the full set runs on every deploy. Adding a migration here is what
+# keeps a fresh box and a long-lived one on the same schema — the vendor-profile
+# and product-status ones used to be run by hand and were easy to forget.
+( cd backend \
+  && npm run migrate \
+  && npm run migrate:email \
+  && npm run migrate:password \
+  && npm run migrate:vendor-profile \
+  && npm run migrate:product-status \
+  && npm run migrate:auction-filters )
 
 echo "==> Installing frontend dependencies"
 npm ci
