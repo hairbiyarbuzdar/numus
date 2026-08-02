@@ -8,6 +8,7 @@ import { CITIES } from '../../constants';
 import {
   Banknote,
   Building2,
+  ChevronDown,
   CreditCard,
   Loader2,
   Mail,
@@ -100,11 +101,13 @@ const Checkout: React.FC = () => {
     };
 
     try {
-      const newOrderId = createCheckoutOrder(orderData);
+      // Orders are persisted server-side now, so this is a real request — the
+      // cart is only cleared once it has actually been accepted.
+      const newOrderId = await createCheckoutOrder(orderData);
       clearCart();
       void router.push(`/buyer/order-confirmation?orderId=${encodeURIComponent(newOrderId)}`);
     } catch (error) {
-      alert('Failed to place order. Please try again.');
+      alert(error instanceof Error ? error.message : 'Failed to place order. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -217,16 +220,24 @@ const Checkout: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                  <label htmlFor="checkout-city" className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                  {/* `appearance-none` is what keeps this matching the inputs
+                      beside it: without it Safari applies its own native select
+                      chrome — extra internal padding, its own height and its own
+                      dropdown arrow — which pushed the icon out of alignment.
+                      The icons are centred rather than pinned to a fixed offset,
+                      and ignore pointer events so clicks reach the select. */}
                   <div className="relative">
-                    <Building2 className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                    <Building2 className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <select
+                      id="checkout-city"
                       value={formData.city}
                       onChange={e => setFormData({ ...formData, city: e.target.value })}
-                      className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
+                      className="w-full appearance-none pl-9 pr-9 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
                     >
                       {CITIES.map(city => <option key={city} value={city}>{city}</option>)}
                     </select>
+                    <ChevronDown className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                   </div>
                   {errors.city && <p className="text-xs text-red-600 mt-1">{errors.city}</p>}
                 </div>
@@ -300,14 +311,21 @@ const Checkout: React.FC = () => {
           <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm sticky top-24">
             <h3 className="text-lg font-bold text-gray-900 mb-4">Order Summary</h3>
             
+            {/* Quantity and title alone made two different products that share a
+                name look like one duplicated line with contradictory totals.
+                Unit price and vendor match what the cart drawer and cart page
+                already show. */}
             <div className="space-y-4 mb-6 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
               {cart.map(item => (
-                <div key={item.productId} className="flex justify-between text-sm">
-                  <div className="flex gap-2">
-                    <span className="text-gray-500">{item.qty}x</span>
-                    <span className="text-gray-900 truncate max-w-[150px]">{item.title}</span>
+                <div key={item.productId} className="flex items-start justify-between gap-3 text-sm">
+                  <div className="min-w-0">
+                    <p className="truncate text-gray-900">{item.title}</p>
+                    <p className="text-xs text-gray-500">
+                      {item.qty} × {formatCurrency(item.price)}
+                      {item.vendorName ? ` · ${item.vendorName}` : ''}
+                    </p>
                   </div>
-                  <span className="font-medium">{formatCurrency(item.price * item.qty)}</span>
+                  <span className="shrink-0 font-medium text-gray-900">{formatCurrency(item.price * item.qty)}</span>
                 </div>
               ))}
             </div>

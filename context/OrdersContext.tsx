@@ -1,43 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useProducts } from "./ProductContext";
+import { useAuth } from "./AuthContext";
 import { readLocalStorage, writeLocalStorage } from "../utils/localStorage";
+import { createLazyFetch } from "../utils/lazyFetch";
+import { CreateOrderPayload, OrderRecord, OrderStatus, orderApi } from "../services/orderApi";
 
-export type OrderStatus = "Pending" | "Confirmed" | "Processing" | "Shipped" | "Delivered" | "Cancelled";
-
-export interface OrderLine {
-  productId: string;
-  title: string;
-  price: number;
-  qty: number;
-  image: string;
-  vendorId: string;
-  vendorName: string;
-}
-
-export interface OrderRecord {
-  id: string;
-  source: "checkout" | "auction";
-  auctionId?: string;
-  customerId: string;
-  customerInfo: {
-    fullName: string;
-    phone: string;
-    whatsapp: string;
-    email: string;
-  };
-  addressInfo: {
-    fullAddress: string;
-    city: string;
-    postalCode: string;
-  };
-  paymentMethod: "easypaisa" | "jazzcash" | "cod";
-  items: OrderLine[];
-  subtotal: number;
-  deliveryFee: number;
-  total: number;
-  status: OrderStatus;
-  createdAt: number;
-}
+export type { OrderStatus, OrderRecord } from "../services/orderApi";
+export type { OrderItem as OrderLine } from "../services/orderApi";
 
 export interface AppNotification {
   id: string;
@@ -48,48 +17,39 @@ export interface AppNotification {
   read: boolean;
 }
 
-interface CreateCheckoutOrderPayload {
-  customerId: string;
-  customerInfo: OrderRecord["customerInfo"];
-  addressInfo: OrderRecord["addressInfo"];
-  paymentMethod: OrderRecord["paymentMethod"];
-  items: OrderLine[];
-  subtotal: number;
-  deliveryFee: number;
-  total: number;
-}
+type CreateCheckoutOrderPayload = Omit<CreateOrderPayload, "source" | "auctionId">;
 
 interface OrdersContextType {
   orders: OrderRecord[];
   notifications: AppNotification[];
-  /**
-   * False until the stored orders have been read. Orders still live in
-   * localStorage rather than the backend `/orders` API, so this settles on the
-   * first client render — modules use it to show a loading state consistently
-   * with the API-backed ones. See CHANGES.md #18.
-   */
+  loading: boolean;
+  /** True once orders have been fetched for the current user — the cache is warm. */
   loaded: boolean;
-  createCheckoutOrder: (payload: CreateCheckoutOrderPayload) => string;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  error: string | null;
+  /** Loads orders if they aren't cached yet. Call this from a module that needs them. */
+  ensureOrders: () => Promise<void>;
+  /** Forces a refetch, cached or not. */
+  refreshOrders: () => Promise<void>;
+  createCheckoutOrder: (payload: CreateCheckoutOrderPayload) => Promise<string>;
+  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   markNotificationRead: (notificationId: string) => void;
 }
 
-const ORDER_STORAGE_KEY = "kissanhub_orders";
 const NOTIF_STORAGE_KEY = "kissanhub_notifications";
+const SETTLE_INTERVAL_MS = 15000;
 
 const OrdersContext = createContext<OrdersContextType | undefined>(undefined);
 
-const generateOrderId = () => {
-  const stamp = Date.now().toString().slice(-6);
-  const random = Math.floor(Math.random() * 9000 + 1000);
-  return `ORD-${stamp}-${random}`;
-};
-
 export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const { products, closeExpiredAuctions, attachAuctionWinnerOrder } = useProducts();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
   const productsRef = useRef(products);
   const closeExpiredAuctionsRef = useRef(closeExpiredAuctions);
   const attachAuctionWinnerOrderRef = useRef(attachAuctionWinnerOrder);
@@ -106,132 +66,171 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     attachAuctionWinnerOrderRef.current = attachAuctionWinnerOrder;
   }, [attachAuctionWinnerOrder]);
 
+  // Orders live in the database; only these local auction-won notices are still
+  // browser-stored (the API-backed feed is NotificationsContext).
   useEffect(() => {
-    setOrders(readLocalStorage<OrderRecord[]>(ORDER_STORAGE_KEY, []));
     setNotifications(readLocalStorage<AppNotification[]>(NOTIF_STORAGE_KEY, []));
     setHydrated(true);
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    writeLocalStorage(ORDER_STORAGE_KEY, orders);
-  }, [orders, hydrated]);
-
-  useEffect(() => {
-    if (!hydrated) return;
     writeLocalStorage(NOTIF_STORAGE_KEY, notifications);
   }, [notifications, hydrated]);
 
-  const createCheckoutOrder = (payload: CreateCheckoutOrderPayload) => {
-    const newOrder: OrderRecord = {
-      id: generateOrderId(),
-      source: "checkout",
-      customerId: payload.customerId,
-      customerInfo: payload.customerInfo,
-      addressInfo: payload.addressInfo,
-      paymentMethod: payload.paymentMethod,
-      items: payload.items,
-      subtotal: payload.subtotal,
-      deliveryFee: payload.deliveryFee,
-      total: payload.total,
-      status: "Pending",
-      createdAt: Date.now(),
-    };
-    setOrders((prev) => [newOrder, ...prev]);
-    return newOrder.id;
-  };
+  // Same lazy-cache rules as products and users — see utils/lazyFetch.ts.
+  const cacheRef = useRef(createLazyFetch());
 
-  const updateOrderStatus = (orderId: string, status: OrderStatus) => {
-    setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, status } : order)));
-  };
+  const fetchOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      // The API scopes the list by role: buyers get their own orders, vendors
+      // get orders containing their items, admins get everything.
+      const nextOrders = await orderApi.listOrders();
+      setOrders(nextOrders);
+      setLoaded(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load orders.");
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const markNotificationRead = (notificationId: string) => {
+  const refreshOrders = useCallback(
+    () => cacheRef.current.run(fetchOrders).catch(() => undefined),
+    [fetchOrders]
+  );
+
+  const ensureOrders = useCallback(
+    () => cacheRef.current.ensure(fetchOrders).catch(() => undefined),
+    [fetchOrders]
+  );
+
+  // Signing in or out invalidates the cache — orders are scoped to the caller.
+  useEffect(() => {
+    cacheRef.current.invalidate();
+    setOrders([]);
+    setLoaded(false);
+    setError(null);
+  }, [user?.uid]);
+
+  const createCheckoutOrder = useCallback(async (payload: CreateCheckoutOrderPayload) => {
+    const order = await orderApi.createOrder({ ...payload, source: "checkout" });
+    setOrders((prev) => [order, ...prev.filter((existing) => existing.id !== order.id)]);
+    return order.id;
+  }, []);
+
+  const updateOrderStatus = useCallback(async (orderId: string, status: OrderStatus) => {
+    const updated = await orderApi.updateOrderStatus(orderId, status);
+    setOrders((prev) => prev.map((order) => (order.id === updated.id ? updated : order)));
+  }, []);
+
+  const markNotificationRead = useCallback((notificationId: string) => {
     setNotifications((prev) =>
       prev.map((notification) => (notification.id === notificationId ? { ...notification, read: true } : notification))
     );
-  };
+  }, []);
 
+  /**
+   * Closes auctions whose end time has passed and raises an order for each
+   * winner.
+   *
+   * Admin-only on purpose: orders are shared now, so if every signed-in browser
+   * ran this they would race to create duplicate orders for the same auction.
+   * `closeExpiredAuctions` already no-ops for other roles. The right long-term
+   * home for this is the backend close-expired-auctions job — see CHANGES.md.
+   */
   const settleAuctions = useCallback(async () => {
-    if (!hydrated) return;
+    const isAdmin = user?.role === "superAdmin" || user?.userType === "admin";
+    if (!isAdmin) return;
 
     const currentProducts = productsRef.current;
     const endedAuctions = await closeExpiredAuctionsRef.current();
     const manualEnded = currentProducts
-        .filter((product) => product.isAuction && product.auctionStatus === "ended" && !product.winnerOrderId)
-        .map((product) => ({
-          auctionId: product.id,
-          winnerBidderId: product.winnerBidderId,
-          winnerBidderName: product.winnerBidderName,
-        }));
-      const allEndedMap = new Map<string, { auctionId: string; winnerBidderId?: string; winnerBidderName?: string }>();
-      [...endedAuctions, ...manualEnded].forEach((entry) => {
-        allEndedMap.set(entry.auctionId, entry);
-      });
-      const allEnded = Array.from(allEndedMap.values());
-      if (!allEnded.length) return;
+      .filter((product) => product.isAuction && product.auctionStatus === "ended" && !product.winnerOrderId)
+      .map((product) => ({
+        auctionId: product.id,
+        winnerBidderId: product.winnerBidderId,
+        winnerBidderName: product.winnerBidderName,
+      }));
+
+    const allEndedMap = new Map<string, { auctionId: string; winnerBidderId?: string; winnerBidderName?: string }>();
+    [...endedAuctions, ...manualEnded].forEach((entry) => {
+      allEndedMap.set(entry.auctionId, entry);
+    });
+    const allEnded = Array.from(allEndedMap.values());
+    if (!allEnded.length) return;
 
     for (const ended of allEnded) {
       if (!ended.winnerBidderId) continue;
-      const auction = currentProducts.find((p) => p.id === ended.auctionId);
+      const auction = currentProducts.find((product) => product.id === ended.auctionId);
+      // winnerOrderId is the guard against raising a second order for the same auction.
       if (!auction || auction.winnerOrderId) continue;
 
-      const order: OrderRecord = {
-        id: generateOrderId(),
-        source: "auction",
-        auctionId: auction.id,
-        customerId: ended.winnerBidderId,
-        customerInfo: {
-          fullName: ended.winnerBidderName || "Auction Winner",
-          phone: "N/A",
-          whatsapp: "N/A",
-          email: "N/A",
-        },
-        addressInfo: {
-          fullAddress: "Pending shipping details",
-          city: "N/A",
-          postalCode: "N/A",
-        },
-        paymentMethod: "cod",
-        items: [
-          {
-            productId: auction.id,
-            title: auction.title,
-            price: auction.currentHighestBid || auction.startingPrice || 0,
-            qty: auction.auctionQuantity || 1,
-            image: auction.images[0],
-            vendorId: auction.vendorId,
-            vendorName: auction.vendorName,
-          },
-        ],
-        subtotal: (auction.currentHighestBid || auction.startingPrice || 0) * (auction.auctionQuantity || 1),
-        deliveryFee: 0,
-        total: (auction.currentHighestBid || auction.startingPrice || 0) * (auction.auctionQuantity || 1),
-        status: "Pending",
-        createdAt: Date.now(),
-      };
+      const unitPrice = auction.currentHighestBid || auction.startingPrice || 0;
+      const qty = auction.auctionQuantity || 1;
 
-      setOrders((prev) => [order, ...prev]);
-      await attachAuctionWinnerOrderRef.current(auction.id, order.id);
-      setNotifications((prev) => [
-        {
-          id: `NTF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          userId: ended.winnerBidderId,
-          title: "Auction Won",
-          message: `You won auction "${auction.title}". Order ${order.id} has been created.`,
-          createdAt: Date.now(),
-          read: false,
-        },
-        ...prev,
-      ]);
+      try {
+        const order = await orderApi.createOrder({
+          source: "auction",
+          auctionId: auction.id,
+          customerId: ended.winnerBidderId,
+          customerInfo: {
+            fullName: ended.winnerBidderName || "Auction Winner",
+            phone: "N/A",
+            whatsapp: "N/A",
+            email: "N/A",
+          },
+          addressInfo: {
+            fullAddress: "Pending shipping details",
+            city: "N/A",
+            postalCode: "N/A",
+          },
+          paymentMethod: "cod",
+          items: [
+            {
+              productId: auction.id,
+              title: auction.title,
+              price: unitPrice,
+              qty,
+              image: auction.images[0],
+              vendorId: auction.vendorId,
+              vendorName: auction.vendorName,
+            },
+          ],
+          subtotal: unitPrice * qty,
+          deliveryFee: 0,
+          total: unitPrice * qty,
+        });
+
+        setOrders((prev) => [order, ...prev.filter((existing) => existing.id !== order.id)]);
+        await attachAuctionWinnerOrderRef.current(auction.id, order.id);
+        setNotifications((prev) => [
+          {
+            id: `NTF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            userId: ended.winnerBidderId as string,
+            title: "Auction Won",
+            message: `You won auction "${auction.title}". Order ${order.id} has been created.`,
+            createdAt: Date.now(),
+            read: false,
+          },
+          ...prev,
+        ]);
+      } catch {
+        // A failed settlement is retried on the next tick rather than surfaced —
+        // the auction stays without a winner order until it succeeds.
+      }
     }
-  }, [hydrated]);
+  }, [user?.role, user?.userType]);
 
   useEffect(() => {
     if (!hydrated) return;
     void settleAuctions();
     const timer = setInterval(() => {
       void settleAuctions();
-    }, 15000);
+    }, SETTLE_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [hydrated, settleAuctions]);
 
@@ -239,12 +238,27 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     () => ({
       orders,
       notifications,
-      loaded: hydrated,
+      loading,
+      loaded,
+      error,
+      ensureOrders,
+      refreshOrders,
       createCheckoutOrder,
       updateOrderStatus,
       markNotificationRead,
     }),
-    [hydrated, notifications, orders]
+    [
+      createCheckoutOrder,
+      ensureOrders,
+      error,
+      loaded,
+      loading,
+      markNotificationRead,
+      notifications,
+      orders,
+      refreshOrders,
+      updateOrderStatus,
+    ]
   );
 
   return <OrdersContext.Provider value={value}>{children}</OrdersContext.Provider>;

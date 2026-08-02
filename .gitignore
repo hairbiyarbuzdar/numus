@@ -26,3 +26,10 @@ aws-test-key.pem
 *.njsproj
 *.sln
 *.sw?
+
+# Uploaded files live on the server's disk, not in the repo
+uploads/
+
+# Production env files (secrets)
+.env.production
+backend/.env

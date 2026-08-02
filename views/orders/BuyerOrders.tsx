@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { PackageSearch } from "lucide-react";
 import { useOrders } from "../../context/OrdersContext";
 import { useAuth } from "../../context/AuthContext";
 import { formatCurrency } from "../../utils/helpers";
+import { SkeletonCards } from "../../components/Skeleton";
 
 const statusClass = (status: string) => {
   if (status === "Pending" || status === "Confirmed") return "bg-amber-100 text-amber-700";
@@ -14,8 +15,40 @@ const statusClass = (status: string) => {
 
 const BuyerOrders: React.FC = () => {
   const { user } = useAuth();
-  const { orders, updateOrderStatus } = useOrders();
+  const { orders, loaded, error, ensureOrders, refreshOrders, updateOrderStatus } = useOrders();
+
+  // Orders are fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureOrders();
+  }, [ensureOrders]);
+
   const myOrders = orders.filter((order) => order.customerId === user?.uid);
+
+  const handleCancel = async (orderId: string) => {
+    try {
+      await updateOrderStatus(orderId, "Cancelled");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to cancel the order.");
+    }
+  };
+
+  if (!loaded) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">My Orders</h1>
+        <SkeletonCards count={3} className="space-y-4" label="Loading your orders" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        {error}
+        <button onClick={() => void refreshOrders()} className="ml-2 font-semibold underline">Retry</button>
+      </div>
+    );
+  }
 
   if (myOrders.length === 0) {
     return (
@@ -45,7 +78,7 @@ const BuyerOrders: React.FC = () => {
               </span>
               {(order.status === "Pending" || order.status === "Confirmed") && (
                 <button
-                  onClick={() => updateOrderStatus(order.id, "Cancelled")}
+                  onClick={() => void handleCancel(order.id)}
                   className="text-xs px-2.5 py-1 rounded-md border border-red-200 text-red-600 hover:bg-red-50"
                 >
                   Cancel

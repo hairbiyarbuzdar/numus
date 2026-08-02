@@ -36,15 +36,16 @@ const AdminNotificationsCenter: React.FC = () => {
   const router = useRouter();
   const { users, loaded: usersLoaded, ensureUsers } = useUsers();
   const { products, loaded: productsLoaded, ensureProducts } = useProducts();
-  const { orders, notifications: userNotifications, markNotificationRead } = useOrders();
+  const { orders, loaded: ordersLoaded, ensureOrders, notifications: userNotifications, markNotificationRead } = useOrders();
 
-  // The feed is derived from users + products, so it asks for them on open.
+  // The feed is derived from users, products and orders, so it asks for them on open.
   useEffect(() => {
     void ensureUsers();
     void ensureProducts();
-  }, [ensureProducts, ensureUsers]);
+    void ensureOrders();
+  }, [ensureOrders, ensureProducts, ensureUsers]);
 
-  const isLoading = !usersLoaded || !productsLoaded;
+  const isLoading = !usersLoaded || !productsLoaded || !ordersLoaded;
   const [filter, setFilter] = useState<NotifType>("all");
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
 

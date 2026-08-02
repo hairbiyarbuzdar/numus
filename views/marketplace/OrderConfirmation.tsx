@@ -1,16 +1,31 @@
-import React from "react";
+import React, { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { CalendarDays, CheckCircle2, Clock3, Package2 } from "lucide-react";
 import { useOrders } from "../../context/OrdersContext";
 import { formatCurrency } from "../../utils/helpers";
+import { SkeletonLines } from "../../components/Skeleton";
 
 const OrderConfirmation: React.FC = () => {
   const router = useRouter();
-  const { orders } = useOrders();
+  const { orders, loaded, ensureOrders } = useOrders();
   const orderIdParam = router.query.orderId;
   const orderId = Array.isArray(orderIdParam) ? orderIdParam[0] : orderIdParam;
   const order = orderId ? orders.find((record) => record.id === orderId) : undefined;
+
+  useEffect(() => {
+    void ensureOrders();
+  }, [ensureOrders]);
+
+  // Until orders have loaded, "not found" is indistinguishable from "not
+  // fetched yet" — don't tell the buyer their new order is missing.
+  if (!loaded) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-6">
+        <SkeletonLines lines={5} label="Loading your order confirmation" />
+      </div>
+    );
+  }
 
   if (!order) {
     return (

@@ -20,16 +20,17 @@ const StatCard: React.FC<{ title: string; value: string; detail: string; icon: R
 const SuperAdminDashboard: React.FC = () => {
   const { users, loaded: usersLoaded, ensureUsers } = useUsers();
   const { products, loaded: productsLoaded, ensureProducts } = useProducts();
-  const { orders } = useOrders();
+  const { orders, loaded: ordersLoaded, ensureOrders } = useOrders();
 
-  // This dashboard is the one place that genuinely needs both lists, so it asks
-  // for them on open rather than having them fetched at login.
+  // This dashboard is the one place that genuinely needs all three lists, so it
+  // asks for them on open rather than having them fetched at login.
   useEffect(() => {
     void ensureUsers();
     void ensureProducts();
-  }, [ensureProducts, ensureUsers]);
+    void ensureOrders();
+  }, [ensureOrders, ensureProducts, ensureUsers]);
 
-  const isLoading = !usersLoaded || !productsLoaded;
+  const isLoading = !usersLoaded || !productsLoaded || !ordersLoaded;
 
   const stats = useMemo(() => {
     const appUsers = users.filter((user) => user.userType !== "admin");

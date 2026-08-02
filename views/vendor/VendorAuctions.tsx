@@ -5,6 +5,7 @@ import { useProducts } from '../../context/ProductContext';
 import { useAuth } from '../../context/AuthContext';
 import { Product } from '../../types';
 import { SkeletonCards } from '../../components/Skeleton';
+import { uploadApi } from '../../services/uploadApi';
 
 // Matches the field-label style used elsewhere in the vendor portal
 // (see views/vendor/VendorProducts.tsx).
@@ -41,6 +42,7 @@ const VendorAuctions: React.FC = () => {
   // Null while creating; the auction's id while editing an existing one.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [imagePreview, setImagePreview] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const savingRef = useRef(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -53,13 +55,22 @@ const VendorAuctions: React.FC = () => {
     void ensureProducts();
   }, [ensureProducts]);
 
-  const readFileAsDataUrl = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Image upload failed.'));
-      reader.readAsDataURL(file);
-    });
+  /**
+   * Uploads the file and keeps only the returned URL — the image bytes are no
+   * longer embedded in the auction row.
+   */
+  const handleImageSelected = async (file?: File) => {
+    if (!file) return;
+    setIsUploading(true);
+    try {
+      const url = await uploadApi.uploadFile(file, 'auctions');
+      setImagePreview(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Image upload failed.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const closeForm = () => {
     setForm(EMPTY_FORM);
@@ -377,14 +388,15 @@ const VendorAuctions: React.FC = () => {
               id="auction-image-file"
               type="file"
               accept="image/*"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const dataUrl = await readFileAsDataUrl(file);
-                setImagePreview(dataUrl);
-              }}
-              className={INPUT_CLASS}
+              disabled={isUploading}
+              onChange={(e) => void handleImageSelected(e.target.files?.[0])}
+              className={`${INPUT_CLASS} disabled:opacity-60`}
             />
+            {isUploading && (
+              <p className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="w-3 h-3 animate-spin" /> Uploading image…
+              </p>
+            )}
           </div>
           {imagePreview && (
             <img src={imagePreview} alt="Preview" className="w-24 h-24 object-cover rounded-lg border border-gray-200" />

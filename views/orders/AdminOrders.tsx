@@ -1,12 +1,26 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { OrderStatus, useOrders } from "../../context/OrdersContext";
 import { formatCurrency } from "../../utils/helpers";
 import { Search } from "lucide-react";
+import { SkeletonTableRows } from "../../components/Skeleton";
 
 const ORDER_STATUS_OPTIONS: OrderStatus[] = ["Pending", "Confirmed", "Processing", "Shipped", "Delivered", "Cancelled"];
 
 const AdminOrders: React.FC = () => {
-  const { orders, updateOrderStatus } = useOrders();
+  const { orders, loaded, ensureOrders, updateOrderStatus } = useOrders();
+
+  // Orders are fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureOrders();
+  }, [ensureOrders]);
+
+  const handleStatusChange = async (orderId: string, status: OrderStatus) => {
+    try {
+      await updateOrderStatus(orderId, status);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update the order status.");
+    }
+  };
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | OrderStatus>("all");
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
@@ -84,7 +98,7 @@ const AdminOrders: React.FC = () => {
                 <td className="px-4 py-3">
                   <select
                     value={order.status}
-                    onChange={(e) => updateOrderStatus(order.id, e.target.value as OrderStatus)}
+                    onChange={(e) => void handleStatusChange(order.id, e.target.value as OrderStatus)}
                     className="px-3 py-1.5 border border-slate-300 rounded-lg bg-white"
                   >
                     {ORDER_STATUS_OPTIONS.map((status) => (
@@ -102,7 +116,8 @@ const AdminOrders: React.FC = () => {
                 </td>
               </tr>
             ))}
-            {filteredOrders.length === 0 && (
+            {!loaded && <SkeletonTableRows rows={5} columns={9} label="Loading orders" />}
+            {loaded && filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-slate-500">No orders found.</td>
               </tr>

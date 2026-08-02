@@ -13,6 +13,7 @@ import {
 import { Product, ProductApprovalStatus, ProductStatus, ProductType } from '../../types';
 import { buildPageList, formatCurrency } from '../../utils/helpers';
 import { SkeletonTableRows } from '../../components/Skeleton';
+import { uploadApi } from '../../services/uploadApi';
 import { useProducts } from '../../context/ProductContext';
 import { useAuth } from '../../context/AuthContext';
 import { PaginatedProducts, ProductQuery, ProductSort, productApi } from '../../services/productApi';
@@ -78,6 +79,7 @@ const VendorProducts: React.FC = () => {
   const { user } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [imagePreview, setImagePreview] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const savingRef = useRef(false);
 
@@ -235,13 +237,22 @@ const VendorProducts: React.FC = () => {
     }
   };
 
-  const readFileAsDataUrl = (file: File): Promise<string> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Image upload failed.'));
-      reader.readAsDataURL(file);
-    });
+  /**
+   * Uploads the file and keeps only the returned URL — the image bytes are no
+   * longer embedded in the product row.
+   */
+  const handleImageSelected = async (file?: File) => {
+    if (!file) return;
+    setIsUploading(true);
+    try {
+      const url = await uploadApi.uploadFile(file, 'products');
+      setImagePreview(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Image upload failed.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleCreateProduct = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -461,14 +472,15 @@ const VendorProducts: React.FC = () => {
               id="product-image-file"
               type="file"
               accept="image/*"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const dataUrl = await readFileAsDataUrl(file);
-                setImagePreview(dataUrl);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              disabled={isUploading}
+              onChange={(e) => void handleImageSelected(e.target.files?.[0])}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:opacity-60"
             />
+            {isUploading && (
+              <p className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+                <Loader2 className="w-3 h-3 animate-spin" /> Uploading image…
+              </p>
+            )}
             {imagePreview && (
               <img src={imagePreview} alt="Preview" className="mt-2 w-24 h-24 object-cover rounded-lg border border-gray-200" />
             )}

@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require("uuid");
 const pool = require("../db");
 const { requireRole, requireApprovedVendor } = require("../middleware/auth");
 const { emitNotification } = require("../socket");
+const { toLikePattern, parsePositiveInt, parseTimestamp } = require("../utils/sql");
 
 const router = express.Router();
 
@@ -53,29 +54,6 @@ const DATE_RANGE_FIELDS = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// `%`, `_` and `\` are wildcards/escapes in ILIKE — treat them as literals so a
-// search for "50%" doesn't match everything.
-function toLikePattern(term) {
-  return `%${term.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
-}
-
-function parsePositiveInt(value, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-/**
- * Accepts epoch milliseconds (what the UI sends, so day boundaries follow the
- * user's own clock) or any date string Date.parse understands. Returns null for
- * "not supplied" and NaN for "supplied but unusable".
- */
-function parseTimestamp(value) {
-  if (value === undefined || value === null || value === "") return null;
-  const asNumber = Number(value);
-  if (Number.isFinite(asNumber)) return Math.trunc(asNumber);
-  return Date.parse(value);
-}
 
 /**
  * Builds the shared WHERE clause for product listings from the request.
@@ -389,14 +367,28 @@ router.get("/filter-options", async (req, res) => {
     const filters = buildProductFilters(scopeReq);
     if (filters.error) return res.status(400).json({ message: filters.error });
 
+    const joiner = filters.where ? "AND" : "WHERE";
+
     const { rows } = await pool.query(
       `SELECT DISTINCT p.category FROM products p ${filters.where}
-       ${filters.where ? "AND" : "WHERE"} p.category IS NOT NULL AND p.category <> ''
+       ${joiner} p.category IS NOT NULL AND p.category <> ''
        ORDER BY p.category ASC`,
       filters.values
     );
 
-    res.json({ categories: rows.map((row) => row.category) });
+    // Vendors that actually have listings the caller can see — the marketplace
+    // vendor filter must not offer a farmer with nothing on sale.
+    const { rows: vendorRows } = await pool.query(
+      `SELECT DISTINCT p.vendor_id, p.vendor_name FROM products p ${filters.where}
+       ${joiner} p.vendor_name IS NOT NULL AND p.vendor_name <> ''
+       ORDER BY p.vendor_name ASC`,
+      filters.values
+    );
+
+    res.json({
+      categories: rows.map((row) => row.category),
+      vendors: vendorRows.map((row) => ({ id: row.vendor_id, name: row.vendor_name })),
+    });
   } catch (err) {
     console.error("GET /products/filter-options error:", err);
     res.status(500).json({ message: "Server error" });

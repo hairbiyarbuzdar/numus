@@ -34,7 +34,8 @@ echo "==> Running database migrations"
   && npm run migrate:password \
   && npm run migrate:vendor-profile \
   && npm run migrate:product-status \
-  && npm run migrate:auction-filters )
+  && npm run migrate:auction-filters \
+  && npm run migrate:attachments )
 
 echo "==> Installing frontend dependencies"
 npm ci

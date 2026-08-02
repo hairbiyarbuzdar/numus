@@ -1,4 +1,20 @@
-import { BulkTier, Product } from '../types';
+import { BulkTier, Product, Role } from '../types';
+
+/**
+ * Where the Settings / Profile Settings links point for a given role. Mirrors
+ * the Settings entry in components/Sidebar.tsx — the profile dropdown used to
+ * hardcode its own path and drifted out of sync with it.
+ */
+export const getSettingsPath = (role?: Role) => {
+  switch (role) {
+    case 'superAdmin':
+      return '/admin/settings';
+    case 'vendor':
+      return '/vendor/settings';
+    default:
+      return '/buyer/settings';
+  }
+};
 
 export type AuctionDisplayStatus = 'pending' | 'rejected' | 'active' | 'ended' | 'cancelled';
 

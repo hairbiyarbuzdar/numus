@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { CheckCircle2, Loader2, Mail, MapPin, ShieldCheck, UserRound } from "lucide-react";
+import { CheckCircle2, ChevronDown, Loader2, Mail, MapPin, ShieldCheck, UserRound } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { CITIES } from "../../constants";
 import SetPasswordStep from "./SetPasswordStep";
@@ -157,18 +157,23 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ compact = false, onSuccess }) => {
 
           {registerType === "customer" && (
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">City</label>
+              <label htmlFor="register-city" className="mb-1 block text-sm font-medium text-gray-700">City</label>
+              {/* Same treatment as the checkout City field — see Checkout.tsx:
+                  without `appearance-none` Safari applies native select chrome
+                  and the icon falls out of alignment with the inputs around it. */}
               <div className="relative">
-                <MapPin className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 <select
+                  id="register-city"
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-3 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
+                  className="w-full appearance-none rounded-lg border border-gray-300 bg-white py-2 pl-9 pr-9 focus:border-emerald-500 focus:outline-none disabled:bg-gray-50"
                 >
                   {CITIES.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
               </div>
             </div>
           )}

@@ -5,6 +5,7 @@ import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { useNotifications } from '../context/NotificationsContext';
 import { APP_NAME } from '../constants';
+import { getSettingsPath } from '../utils/helpers';
 import Link from "next/link";
 import { useRouter } from "next/router";
 
@@ -219,7 +220,7 @@ const Navbar: React.FC<NavbarProps> = ({ toggleSidebar }) => {
             </button>
 
             <div className={`absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-100 py-1 ${profileMenuOpen ? "block" : "hidden"}`}>
-              <Link href="/profile" className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Profile Settings</Link>
+              <Link href={getSettingsPath(user?.role)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">Profile Settings</Link>
               <button
                 onClick={() => { void handleLogout(); }}
                 className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"

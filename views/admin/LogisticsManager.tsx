@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, QrCode, Search, Truck, Warehouse } from "lucide-react";
 import { useLogistics } from "../../context/LogisticsContext";
+import { useOrders } from "../../context/OrdersContext";
 import {
   COURIER_STATUS_FLOW,
   ShipmentMethod,
@@ -31,6 +32,12 @@ const statusFlowByMethod: Record<ShipmentMethod, readonly ShipmentStatus[]> = {
 
 const LogisticsManager: React.FC = () => {
   const { shipments, orders, resolveQrCode, createShipmentFromOrder, updateShipmentStatus, assignCourierService } = useLogistics();
+  const { ensureOrders } = useOrders();
+
+  // Shipments are built from orders, which are fetched when this page opens.
+  useEffect(() => {
+    void ensureOrders();
+  }, [ensureOrders]);
 
   const [activeTab, setActiveTab] = useState<LogisticsTab>("warehouse");
   const [query, setQuery] = useState("");

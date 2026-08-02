@@ -21,9 +21,15 @@ export type AuctionState = "pending" | "active" | "rejected" | "ended" | "cancel
 /** Which timestamp a dateFrom/dateTo range applies to. */
 export type ProductDateField = "created" | "start" | "end";
 
+export interface ProductFilterOptions {
+  categories: string[];
+  vendors: { id: string; name: string }[];
+}
+
 export interface ProductQuery {
   /** Matches title, description, category, vendor name or product/auction id. */
   search?: string;
+  vendorId?: string;
   status?: ProductStatus;
   approvalStatus?: ProductApprovalStatus;
   productType?: ProductType;
@@ -136,7 +142,7 @@ export const productApi = {
 
   // `productType` scopes the options (e.g. only categories that auctions use).
   listFilterOptions(query: Pick<ProductQuery, "productType"> = {}, actor?: ApiActor) {
-    return apiClient.get<{ categories: string[] }>(
+    return apiClient.get<ProductFilterOptions>(
       `/products/filter-options${buildQueryString(query)}`,
       { actor }
     );

@@ -43,15 +43,16 @@ const StatTile: React.FC<{ label: string; value: string; sub?: string; icon: Rea
 const AdminInsights: React.FC = () => {
   const { users, loaded: usersLoaded, ensureUsers } = useUsers();
   const { products, loaded: productsLoaded, ensureProducts } = useProducts();
-  const { orders } = useOrders();
+  const { orders, loaded: ordersLoaded, ensureOrders } = useOrders();
 
   // Fetched when this page opens, not at login.
   useEffect(() => {
     void ensureUsers();
     void ensureProducts();
-  }, [ensureProducts, ensureUsers]);
+    void ensureOrders();
+  }, [ensureOrders, ensureProducts, ensureUsers]);
 
-  const isLoading = !usersLoaded || !productsLoaded;
+  const isLoading = !usersLoaded || !productsLoaded || !ordersLoaded;
 
   const appUsers = useMemo(() => users.filter((u) => u.userType !== "admin"), [users]);
 

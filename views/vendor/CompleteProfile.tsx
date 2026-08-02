@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { AlertCircle, Building2, CheckCircle2, FileBadge2, Loader2, Warehouse } from "lucide-react";
 import { vendorProfileService, VendorProfileFormData } from "../../services/vendorProfileService";
+import { uploadApi } from "../../services/uploadApi";
 import { VendorProfileStatus } from "../../types";
 
 type TabKey = "cnic" | "bank" | "warehouse";
@@ -53,6 +54,7 @@ const CompleteProfile: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabKey>("cnic");
   const [form, setForm] = useState<VendorProfileFormData>(emptyForm);
   const [errors, setErrors] = useState<Partial<Record<keyof VendorProfileFormData, string>>>({});
+  const [uploadingField, setUploadingField] = useState<"cnicFrontImage" | "cnicBackImage" | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -260,7 +262,11 @@ const CompleteProfile: React.FC = () => {
     return true;
   })();
 
-  const handleImageUpload = (field: "cnicFrontImage" | "cnicBackImage", file?: File) => {
+  /**
+   * Uploads the document and stores only its URL on the form. CNIC scans used
+   * to be embedded in the vendor's row as base64.
+   */
+  const handleImageUpload = async (field: "cnicFrontImage" | "cnicBackImage", file?: File) => {
     if (!file) return;
 
     if (!file.type.startsWith("image/")) {
@@ -268,17 +274,23 @@ const CompleteProfile: React.FC = () => {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = String(reader.result);
-      setForm((prev) => ({ ...prev, [field]: value }));
+    setUploadingField(field);
+    try {
+      const url = await uploadApi.uploadFile(file, "profiles");
+      setForm((prev) => ({ ...prev, [field]: url }));
       setErrors((prev) => {
         const next = { ...prev };
         delete next[field];
         return next;
       });
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      setErrors((prev) => ({
+        ...prev,
+        [field]: err instanceof Error ? err.message : "Upload failed. Please try again.",
+      }));
+    } finally {
+      setUploadingField(null);
+    }
   };
 
   const updateField = (field: keyof VendorProfileFormData, value: string) => {
@@ -406,9 +418,11 @@ const CompleteProfile: React.FC = () => {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => handleImageUpload("cnicFrontImage", e.target.files?.[0])}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                    disabled={uploadingField === "cnicFrontImage"}
+                    onChange={(e) => void handleImageUpload("cnicFrontImage", e.target.files?.[0])}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
                   />
+                  {uploadingField === "cnicFrontImage" && <p className="mt-1 text-xs text-gray-500">Uploading…</p>}
                   {form.cnicFrontImage && (
                     <img src={form.cnicFrontImage} alt="CNIC front preview" className="mt-2 h-24 w-40 rounded-lg border object-cover" />
                   )}
@@ -420,9 +434,11 @@ const CompleteProfile: React.FC = () => {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => handleImageUpload("cnicBackImage", e.target.files?.[0])}
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+                    disabled={uploadingField === "cnicBackImage"}
+                    onChange={(e) => void handleImageUpload("cnicBackImage", e.target.files?.[0])}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-60"
                   />
+                  {uploadingField === "cnicBackImage" && <p className="mt-1 text-xs text-gray-500">Uploading…</p>}
                   {form.cnicBackImage && (
                     <img src={form.cnicBackImage} alt="CNIC back preview" className="mt-2 h-24 w-40 rounded-lg border object-cover" />
                   )}

@@ -18,6 +18,7 @@ const ProductDetails: React.FC = () => {
   const { user } = useAuth();
   const { addToWishlist, removeFromWishlist, isWishlisted } = useWishlist();
   const [selectedQty, setSelectedQty] = useState<number>(1);
+  const [justAdded, setJustAdded] = useState(false);
   const [bidAmount, setBidAmount] = useState<number>(0);
   const [timeLeft, setTimeLeft] = useState<{ days: number, hours: number, minutes: number, seconds: number } | null>(null);
   const product: Product | null = useMemo(
@@ -42,6 +43,12 @@ const ProductDetails: React.FC = () => {
       setBidAmount(product.currentHighestBid + (product.bidIncrement || 1000));
     }
   }, [product]);
+
+  // Changing the quantity (or opening a different product) means the buyer wants
+  // to add again, so the button goes back to "Add to Order".
+  useEffect(() => {
+    setJustAdded(false);
+  }, [selectedQty, product?.id]);
 
   useEffect(() => {
     if (!product?.auctionEndTime) {
@@ -128,6 +135,7 @@ const ProductDetails: React.FC = () => {
 
   const handleAddToCart = () => {
     addToCart(product, selectedQty);
+    setJustAdded(true);
   };
 
   const handleWishlist = () => {
@@ -327,27 +335,44 @@ const ProductDetails: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="pt-4 border-t border-gray-200 flex gap-4">
-                    <div className="w-32">
-                      <label className="block text-xs font-semibold text-gray-500 mb-1">Quantity</label>
-                      <input 
-                        type="number" 
-                        min={product.minOrderQty || 1}
-                        value={selectedQty}
-                        onChange={(e) => setSelectedQty(Math.max(product.minOrderQty || 1, parseInt(e.target.value) || 1))}
-                        className="w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none font-bold text-center"
-                      />
-                      <p className="text-xs text-center text-gray-500 mt-1">Min Order: {product.minOrderQty}</p>
+                  {/* The field and the button share one height token and sit on
+                      the same baseline — the button used to align to the top of
+                      the row, level with the label rather than the input. */}
+                  <div className="pt-4 border-t border-gray-200">
+                    <div className="flex items-end gap-4">
+                      <div className="w-32 shrink-0">
+                        <label htmlFor="product-quantity" className="block text-xs font-semibold text-gray-500 mb-1">
+                          Quantity
+                        </label>
+                        <input
+                          id="product-quantity"
+                          type="number"
+                          min={product.minOrderQty || 1}
+                          value={selectedQty}
+                          onChange={(e) => setSelectedQty(Math.max(product.minOrderQty || 1, parseInt(e.target.value) || 1))}
+                          className="h-12 w-full px-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none font-bold text-center"
+                        />
+                      </div>
+                      {justAdded && product.status !== 'out_of_stock' ? (
+                        <button
+                          onClick={() => void router.push('/buyer/cart')}
+                          className="h-12 flex-grow bg-gray-900 text-white rounded-lg font-bold hover:bg-black transition-colors flex items-center justify-center gap-2 shadow-lg shadow-gray-900/20"
+                        >
+                          <CheckCircle className="w-5 h-5 text-emerald-400" /> View Cart
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleAddToCart}
+                          disabled={product.status === 'out_of_stock'}
+                          className="h-12 flex-grow bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:shadow-none"
+                        >
+                          <ShoppingCart className="w-5 h-5" /> {product.status === 'out_of_stock' ? 'Out of Stock' : 'Add to Order'}
+                        </button>
+                      )}
                     </div>
-                    <div className="flex-grow flex items-start">
-                       <button
-                        onClick={handleAddToCart}
-                        disabled={product.status === 'out_of_stock'}
-                        className="w-full h-[50px] bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:shadow-none"
-                       >
-                         <ShoppingCart className="w-5 h-5" /> {product.status === 'out_of_stock' ? 'Out of Stock' : 'Add to Order'}
-                       </button>
-                    </div>
+                    <p className="w-32 text-xs text-center text-gray-500 mt-1">
+                      Min Order: {product.minOrderQty || 1}
+                    </p>
                   </div>
                 </div>
               )}

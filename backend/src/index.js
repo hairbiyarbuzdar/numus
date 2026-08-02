@@ -4,9 +4,14 @@ const http = require("http");
 const cors = require("cors");
 const { actorMiddleware } = require("./middleware/auth");
 const { initSocket } = require("./socket");
+const { UPLOAD_ROOT } = require("./utils/storage");
 
 const app = express();
 const server = http.createServer(app);
+
+// Behind Nginx, so req.protocol/req.get("host") reflect the public URL rather
+// than the loopback address — needed to build absolute URLs for uploads.
+app.set("trust proxy", true);
 
 // ─── Socket.io ────────────────────────────────────────────────────────────────
 initSocket(server);
@@ -22,7 +27,21 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(actorMiddleware);
 
+// ─── Uploaded files ───────────────────────────────────────────────────────────
+// Served under /api so the existing Nginx rule that proxies /api to this
+// backend already covers them — no server config change needed.
+app.use(
+  "/api/uploads",
+  express.static(UPLOAD_ROOT, {
+    maxAge: "30d",
+    // Uploads are content, never code: don't let a stored file be executed or
+    // interpreted as anything other than what its extension says.
+    setHeaders: (res) => res.setHeader("X-Content-Type-Options", "nosniff"),
+  })
+);
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
+app.use("/api/uploads",       require("./routes/uploads"));
 app.use("/api/products",      require("./routes/products"));
 app.use("/api/orders",        require("./routes/orders"));
 app.use("/api/notifications", require("./routes/notifications"));

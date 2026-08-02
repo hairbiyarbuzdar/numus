@@ -11,7 +11,8 @@
     "migrate:password": "node src/db/migrate-password-auth.js",
     "migrate:vendor-profile": "node src/db/migrate-vendor-profile.js",
     "migrate:product-status": "node src/db/migrate-product-status.js",
-    "migrate:auction-filters": "node src/db/migrate-auction-filters.js"
+    "migrate:auction-filters": "node src/db/migrate-auction-filters.js",
+    "migrate:attachments": "node src/db/migrate-attachments.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
