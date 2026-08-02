@@ -7,7 +7,7 @@ type Step = "email" | "otp" | "password";
 const PASSWORD_MIN_LENGTH = 8;
 
 export default function SuperAdminLoginPage() {
-  const { user, loading, requestOtp, verifyOtp, completePasswordSetup, loginWithPassword } = useAuth();
+  const { user, loading, requestOtp, verifyOtp, completePasswordSetup, loginWithPassword, logout } = useAuth();
   const router = useRouter();
 
   const [step, setStep] = useState<Step>("email");
@@ -28,11 +28,28 @@ export default function SuperAdminLoginPage() {
   const primaryButtonClassName =
     "w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white shadow-md shadow-emerald-100 transition hover:bg-emerald-700 disabled:opacity-60";
 
-  useEffect(() => {
-    if (!loading && user?.role === "superAdmin") {
-      void router.replace("/admin");
-    }
-  }, [loading, router, user]);
+  /**
+   * Deliberately no automatic redirect when a session already exists.
+   *
+   * This page used to bounce straight to /admin whenever a superAdmin session
+   * was found in the browser, which meant landing here — including via "Back to
+   * sign in" — dropped you on the dashboard with no credentials entered, and
+   * left no way to reach the sign-in or password-reset screens without clearing
+   * site data. An existing session is now surfaced as a choice instead.
+   */
+  const alreadySignedIn = !loading && user?.role === "superAdmin";
+
+  /** Clears anything left over from an abandoned verification attempt. */
+  const resetFlow = () => {
+    setStep("email");
+    setIsNewAdmin(false);
+    setOtp("");
+    setPassword("");
+    setConfirmPassword("");
+    setTransactionId("");
+    setCountdown(0);
+    setError("");
+  };
 
   useEffect(() => {
     if (countdown <= 0) return;
@@ -173,7 +190,37 @@ export default function SuperAdminLoginPage() {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xl">
-          {step === "email" && !isNewAdmin ? (
+          {alreadySignedIn ? (
+            <div className="space-y-4">
+              <div className="flex items-start gap-2 rounded-lg border border-emerald-500/20 bg-emerald-50 px-3 py-2.5 text-xs text-emerald-800">
+                <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  You are already signed in as{" "}
+                  <strong>{user?.displayName || user?.email}</strong>.
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void router.replace("/admin")}
+                className={primaryButtonClassName}
+              >
+                Continue to Dashboard
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  logout();
+                  resetFlow();
+                  setEmail("");
+                }}
+                className="w-full text-center text-xs text-gray-500 hover:text-gray-700"
+              >
+                Sign out and use a different account
+              </button>
+            </div>
+          ) : step === "email" && !isNewAdmin ? (
             <form onSubmit={handleLoginWithPassword} className="space-y-4">
               <div>
                 <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
@@ -286,7 +333,7 @@ export default function SuperAdminLoginPage() {
 
               <button
                 type="button"
-                onClick={() => { setIsNewAdmin(false); setError(""); }}
+                onClick={resetFlow}
                 className="w-full text-center text-xs text-gray-500 hover:text-gray-700"
               >
                 ← Back to sign in

@@ -26,6 +26,7 @@
 
 ### Admin
 
+- **"Back to sign in" landed on the Dashboard without signing in** — Fixed. The Super Admin page redirected straight to the dashboard whenever a session already existed in the browser, so returning to the sign-in screen bounced you into the dashboard with no credentials entered — and there was no way to reach sign-in or password reset without clearing site data. An existing session is now shown as a choice (continue, or sign out and use another account), and "Back to sign in" clears any half-finished verification attempt. No login request was ever made by that button.
 - **Auction status badges don't reflect the approval workflow** — Fixed. Badges read Pending until approved, then Active / Ended / Cancelled, or Rejected. Active-auction counts follow the same rule.
 - **View Details not opening the auction details modal** — Fixed. The eye icon opens a full auction detail modal including prices, dates, images, winner and bid history.
 - **Auctions page missing pagination, search and filtering** — Fixed. Search by auction ID, product, vendor or category, filter by status, date range and category, sort and page — all server-side.
