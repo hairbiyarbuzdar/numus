@@ -26,6 +26,7 @@
 
 ### Admin
 
+- **Dashboard sections had no pagination** — Fixed. Recent Users, Recent Orders and Recent Auctions each page independently with next/previous and a page-size control, fetching only the rows shown. `GET /auth/users` now supports page, pageSize (or limit), search, userType, isActive and sort; callers that send no paging params still get a plain array. The dashboard totals come from one-row count queries rather than downloading every user, product and order to count them.
 - **"Back to sign in" landed on the Dashboard without signing in** — Fixed. The Super Admin page redirected straight to the dashboard whenever a session already existed in the browser, so returning to the sign-in screen bounced you into the dashboard with no credentials entered — and there was no way to reach sign-in or password reset without clearing site data. An existing session is now shown as a choice (continue, or sign out and use another account), and "Back to sign in" clears any half-finished verification attempt. No login request was ever made by that button.
 - **Auction status badges don't reflect the approval workflow** — Fixed. Badges read Pending until approved, then Active / Ended / Cancelled, or Rejected. Active-auction counts follow the same rule.
 - **View Details not opening the auction details modal** — Fixed. The eye icon opens a full auction detail modal including prices, dates, images, winner and bid history.

@@ -4,11 +4,24 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const pool = require("../db");
 const { requireRole } = require("../middleware/auth");
+const { toLikePattern, parsePositiveInt } = require("../utils/sql");
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
 const PASSWORD_MIN_LENGTH = 8;
 const otpSessions = new Map();
+
+const VALID_USER_TYPES = ["farmer", "customer", "admin"];
+const MAX_USER_PAGE_SIZE = 100;
+
+// Whitelisted sort keys — never interpolate client input into ORDER BY.
+const USER_SORT_OPTIONS = {
+  newest: "created_at DESC",
+  oldest: "created_at ASC",
+  name_asc: "display_name ASC",
+  name_desc: "display_name DESC",
+};
+const DEFAULT_USER_SORT = "newest";
 
 function normalizePhone(value = "") {
   return String(value).replace(/[^\d+]/g, "").trim();
@@ -352,10 +365,74 @@ router.post("/login", async (req, res) => {
 });
 
 // ─── GET /auth/users ──────────────────────────────────────────────────────────
+// Filters: search (name/email/phone/city), userType, isActive
+// Sorting: sort (see USER_SORT_OPTIONS)
+// Paging:  page, pageSize (or limit) — when either is supplied the response
+//   becomes { data, page, pageSize, total, totalPages, hasMore } instead of a
+//   bare array, so existing callers that expect an array keep working.
 router.get("/users", requireRole("superAdmin"), async (req, res) => {
   try {
-    const { rows } = await pool.query("SELECT * FROM users ORDER BY created_at DESC");
-    res.json(rows.map(rowToUser));
+    const { search, userType, isActive } = req.query;
+    const conditions = [];
+    const values = [];
+    let i = 1;
+
+    if (userType) {
+      if (!VALID_USER_TYPES.includes(userType)) {
+        return res.status(400).json({ message: `userType must be one of: ${VALID_USER_TYPES.join(", ")}` });
+      }
+      conditions.push(`user_type = $${i++}`);
+      values.push(userType);
+    }
+
+    if (isActive !== undefined) {
+      conditions.push(`is_active = $${i++}`);
+      values.push(isActive === "true");
+    }
+
+    const searchTerm = typeof search === "string" ? search.trim() : "";
+    if (searchTerm) {
+      conditions.push(
+        `(display_name ILIKE $${i} OR email ILIKE $${i} OR phone ILIKE $${i} OR city ILIKE $${i})`
+      );
+      values.push(toLikePattern(searchTerm));
+      i++;
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const orderBy = USER_SORT_OPTIONS[req.query.sort] || USER_SORT_OPTIONS[DEFAULT_USER_SORT];
+    // Stable tiebreaker so a row can't shift between pages when sort keys tie.
+    const orderClause = `ORDER BY ${orderBy}, id ASC`;
+
+    const paginated = req.query.page !== undefined || req.query.pageSize !== undefined || req.query.limit !== undefined;
+
+    let sql = `SELECT * FROM users ${where} ${orderClause}`;
+    const queryValues = [...values];
+    let page = 1;
+    let pageSize = 0;
+    let total = 0;
+
+    if (paginated) {
+      page = parsePositiveInt(req.query.page, 1);
+      pageSize = Math.min(parsePositiveInt(req.query.pageSize ?? req.query.limit, 10), MAX_USER_PAGE_SIZE);
+
+      const { rows: countRows } = await pool.query(`SELECT COUNT(*)::int AS total FROM users ${where}`, values);
+      total = countRows[0].total;
+
+      const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+      if (page > totalPages) page = totalPages;
+
+      sql += ` LIMIT $${i} OFFSET $${i + 1}`;
+      queryValues.push(pageSize, (page - 1) * pageSize);
+    }
+
+    const { rows } = await pool.query(sql, queryValues);
+    const users = rows.map(rowToUser);
+
+    if (!paginated) return res.json(users);
+
+    const totalPages = Math.max(Math.ceil(total / pageSize), 1);
+    res.json({ data: users, page, pageSize, total, totalPages, hasMore: page < totalPages });
   } catch (err) {
     console.error("GET /auth/users error:", err);
     res.status(500).json({ message: "Server error" });
