@@ -184,6 +184,9 @@ function buildProductFilters(req, startIndex = 1) {
     conditions.push(`p.approval_status = 'approved'`);
     conditions.push(`p.is_active = TRUE`);
     conditions.push(`p.status IN ('active', 'out_of_stock')`);
+    // A withdrawn auction must not appear either. This used to be filtered in
+    // the browser, which stopped working once listings were paged server-side.
+    conditions.push(`(p.is_auction = FALSE OR p.auction_status <> 'cancelled')`);
   }
 
   return {
