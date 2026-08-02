@@ -22,6 +22,7 @@
 - **Save Auction button allows multiple clicks** — Fixed. Same guard as Save Product, on both Save Auction and Save Changes.
 - **Vendor dashboard fetches all module data on login** — Fixed. Products, auctions, orders and users load only when their page is opened, stay cached afterwards, and each module shows a skeleton while loading. Vendors no longer request the user table at all.
 - **Vendor Orders module not API-backed** — Fixed. Orders come from the API instead of browser storage, with listing, details, status updates, search, filters and pagination. Vendor order scoping never matched anything before and now does.
+- **Vendor Dashboard was only a redirect** — Fixed. /vendor is now a real overview: earnings, pipeline, order counts by status, product and auction totals, items awaiting approval, an attention list, recent orders and auctions ending soonest.
 
 ### Admin
 
@@ -40,3 +41,5 @@
 - **Checkout Order Summary lines are ambiguous** — Fixed. Each line shows unit price and vendor, so two listings sharing a name are distinguishable.
 - **Order submission not persisted to the backend** — Fixed. Placing an order sends a real API request and the order is saved in the database; order lists and statuses are read back from the API instead of browser storage.
 - **Attachments stored as base64 instead of uploaded files** — Fixed. Product images, auction images and vendor CNIC documents are uploaded to the server and only their URL is stored in the database. Existing base64 rows are converted by a migration that runs on deploy.
+- **Cart stored in browser local storage instead of the database** — Fixed. Adding, updating, removing and clearing the cart all hit the API and persist per user, so a basket follows the buyer across devices and sessions. Signed-out visitors keep a local basket that is merged into their account on sign-in. Prices are read from the product on load, so a saved cart never shows a stale price.
+- **Wishlist stored in browser local storage instead of the database** — Fixed. Adding and removing wishlist items call the API and persist per user, and the list is loaded from the backend on login or when the Wishlist page opens. Anything saved in the browser beforehand is merged in once.

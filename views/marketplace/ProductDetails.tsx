@@ -138,12 +138,12 @@ const ProductDetails: React.FC = () => {
     setJustAdded(true);
   };
 
-  const handleWishlist = () => {
+  const handleWishlist = async () => {
     if (isWishlisted(product.id)) {
-      removeFromWishlist(product.id);
+      await removeFromWishlist(product.id);
       return;
     }
-    const result = addToWishlist(product);
+    const result = await addToWishlist(product);
     if (!result.ok) {
       alert(result.message);
     }
@@ -192,7 +192,7 @@ const ProductDetails: React.FC = () => {
               </div>
               <h1 className="text-3xl font-bold text-gray-900 mb-2">{product.title}</h1>
               <button
-                onClick={handleWishlist}
+                onClick={() => void handleWishlist()}
                 className={`mb-2 text-sm px-3 py-1.5 rounded-lg border ${isWishlisted(product.id) ? 'border-pink-200 text-pink-600 bg-pink-50' : 'border-gray-300 text-gray-600 hover:bg-gray-50'}`}
               >
                 {isWishlisted(product.id) ? 'Remove from Wishlist' : 'Add to Wishlist'}
