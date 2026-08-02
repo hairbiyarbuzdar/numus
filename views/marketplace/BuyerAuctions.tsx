@@ -8,6 +8,7 @@ import {
   Gavel,
   Loader2,
   Search,
+  ShieldAlert,
   Trophy,
   X,
 } from "lucide-react";
@@ -63,6 +64,10 @@ const BuyerAuctions: React.FC = () => {
 
   const [bidDrafts, setBidDrafts] = useState<Record<string, string>>({});
   const [biddingOn, setBiddingOn] = useState<string | null>(null);
+
+  // Only verified accounts may bid. The API enforces this too — hiding the form
+  // is a courtesy, not the control.
+  const isVerified = user?.verified === true;
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -446,7 +451,14 @@ const BuyerAuctions: React.FC = () => {
                 </p>
               )}
 
-              {!isEnded && isOpen && (
+              {!isEnded && isOpen && !isVerified && (
+                <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <ShieldAlert className="h-4 w-4 shrink-0" />
+                  Verify your account to bid in auctions.
+                </p>
+              )}
+
+              {!isEnded && isOpen && isVerified && (
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <label htmlFor={`bid-${auction.id}`} className="sr-only">Your bid for {auction.title}</label>

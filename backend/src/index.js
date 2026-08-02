@@ -44,6 +44,7 @@ app.use(
 app.use("/api/uploads",       require("./routes/uploads"));
 app.use("/api/products",      require("./routes/products"));
 app.use("/api/orders",        require("./routes/orders"));
+app.use("/api/me",            require("./routes/me"));
 app.use("/api/cart",          require("./routes/cart"));
 app.use("/api/wishlist",      require("./routes/wishlist"));
 app.use("/api/notifications", require("./routes/notifications"));

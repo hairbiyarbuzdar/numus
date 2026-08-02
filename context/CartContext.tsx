@@ -4,6 +4,8 @@ import { calculateBulkPrice } from '../utils/helpers';
 import { readLocalStorage, writeLocalStorage } from '../utils/localStorage';
 import { useAuth } from './AuthContext';
 import { CartLine, cartApi } from '../services/cartApi';
+import { meApi } from '../services/meApi';
+import { createLazyFetch } from '../utils/lazyFetch';
 
 export interface CartItem {
   productId: string;
@@ -26,7 +28,11 @@ interface CartToast {
 interface CartContextType {
   cart: CartItem[];
   loading: boolean;
+  /** True once the cart contents have been fetched for this user. */
+  loaded: boolean;
   error: string | null;
+  /** Loads the cart if it isn't cached yet — call this from the Cart page/drawer. */
+  ensureCart: () => Promise<void>;
   addToCart: (product: Product, qty: number, customPrice?: number) => Promise<void>;
   removeFromCart: (productId: string) => Promise<void>;
   updateQty: (productId: string, qty: number) => Promise<void>;
@@ -74,7 +80,16 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const guestCartRef = useRef<CartItem[]>([]);
   const mergedForRef = useRef<string | null>(null);
 
-  const applyLines = (lines: CartLine[]) => setCart(lines.map(lineToItem));
+  const [loaded, setLoaded] = useState(false);
+  const cacheRef = useRef(createLazyFetch());
+  // Until the contents are fetched, the header badge falls back to the count
+  // from /me/badges so it isn't wrong on pages that never open the cart.
+  const [badgeCount, setBadgeCount] = useState(0);
+
+  const applyLines = (lines: CartLine[]) => {
+    setCart(lines.map(lineToItem));
+    setLoaded(true);
+  };
 
   const pushToast = (message: string) => setToast({ id: Date.now(), message });
 
@@ -84,61 +99,78 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const refreshCart = useCallback(async () => {
+  /**
+   * Fetches the cart contents. A basket built before signing in is merged into
+   * the account the first time this runs for that user.
+   */
+  const fetchCart = useCallback(async () => {
     if (!user?.uid) return;
     try {
       setLoading(true);
       setError(null);
-      applyLines(await cartApi.getCart());
+
+      const pending = readLocalStorage<CartItem[]>(GUEST_STORAGE_KEY, []);
+      let lines: CartLine[];
+
+      if (pending.length && mergedForRef.current !== user.uid) {
+        lines = await cartApi.mergeCart(
+          pending.map((item) => ({ productId: item.productId, qty: item.qty, customPrice: item.customPrice }))
+        );
+        writeLocalStorage(GUEST_STORAGE_KEY, []);
+        guestCartRef.current = [];
+        mergedForRef.current = user.uid;
+      } else {
+        lines = await cartApi.getCart();
+      }
+
+      applyLines(lines);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load your cart.");
+      throw err;
     } finally {
       setLoading(false);
     }
   }, [user?.uid]);
 
-  // Guests read from this browser; signed-in buyers read from the database, and
-  // anything in the guest basket is merged in once.
+  const refreshCart = useCallback(
+    () => cacheRef.current.run(fetchCart).catch(() => undefined),
+    [fetchCart]
+  );
+
+  const ensureCart = useCallback(
+    () => cacheRef.current.ensure(fetchCart).catch(() => undefined),
+    [fetchCart]
+  );
+
+  // Nothing is fetched on sign-in except the header counts; the contents load
+  // when the cart page or drawer is opened. Guests read from this browser,
+  // which costs no request at all.
   useEffect(() => {
+    cacheRef.current.invalidate();
+    meApi.reset();
+    setLoaded(false);
+    setError(null);
+
+    if (!user?.uid) {
+      const stored = readLocalStorage<CartItem[]>(GUEST_STORAGE_KEY, []);
+      guestCartRef.current = stored;
+      setCart(stored);
+      setBadgeCount(stored.reduce((sum, item) => sum + item.qty, 0));
+      mergedForRef.current = null;
+      return;
+    }
+
+    setCart([]);
     let active = true;
+    void meApi
+      .getBadges()
+      .then((badges) => {
+        if (active) setBadgeCount(badges.cartCount);
+      })
+      .catch(() => {
+        if (active) setBadgeCount(0);
+      });
 
-    const load = async () => {
-      if (!user?.uid) {
-        const stored = readLocalStorage<CartItem[]>(GUEST_STORAGE_KEY, []);
-        guestCartRef.current = stored;
-        if (active) setCart(stored);
-        mergedForRef.current = null;
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const pending = readLocalStorage<CartItem[]>(GUEST_STORAGE_KEY, []);
-        let lines: CartLine[];
-
-        if (pending.length && mergedForRef.current !== user.uid) {
-          lines = await cartApi.mergeCart(
-            pending.map((item) => ({ productId: item.productId, qty: item.qty, customPrice: item.customPrice }))
-          );
-          writeLocalStorage(GUEST_STORAGE_KEY, []);
-          guestCartRef.current = [];
-          mergedForRef.current = user.uid;
-        } else {
-          lines = await cartApi.getCart();
-        }
-
-        if (active) {
-          applyLines(lines);
-          setError(null);
-        }
-      } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Failed to load your cart.");
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    void load();
     return () => {
       active = false;
     };
@@ -243,7 +275,9 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const cartCount = cart.reduce((sum, item) => sum + item.qty, 0);
+  // Once the contents are loaded they are the truth; before that the header
+  // shows the count from /me/badges.
+  const cartCount = loaded || isGuest ? cart.reduce((sum, item) => sum + item.qty, 0) : badgeCount;
   const cartTotal = cart.reduce((sum, item) => sum + item.price * item.qty, 0);
 
   return (
@@ -251,14 +285,20 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       value={{
         cart,
         loading,
+        loaded,
         error,
+        ensureCart,
         addToCart,
         removeFromCart,
         updateQty,
         clearCart,
         refreshCart,
         isCartOpen,
-        openCart: () => setIsCartOpen(true),
+        // Opening the drawer is one of the moments the contents are needed.
+        openCart: () => {
+          void ensureCart();
+          setIsCartOpen(true);
+        },
         closeCart: () => setIsCartOpen(false),
         toggleCart: () => setIsCartOpen((prev) => !prev),
         toast,

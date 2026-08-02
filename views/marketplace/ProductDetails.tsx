@@ -16,7 +16,10 @@ const ProductDetails: React.FC = () => {
   const { addToCart } = useCart();
   const { products, loaded, ensureProducts, placeBid } = useProducts();
   const { user } = useAuth();
-  const { addToWishlist, removeFromWishlist, isWishlisted } = useWishlist();
+  const { addToWishlist, removeFromWishlist, isWishlisted, ensureWishlist } = useWishlist();
+
+  // Only verified accounts may bid; the API enforces it as well.
+  const isVerified = user?.verified === true;
   const [selectedQty, setSelectedQty] = useState<number>(1);
   const [justAdded, setJustAdded] = useState(false);
   const [bidAmount, setBidAmount] = useState<number>(0);
@@ -31,10 +34,11 @@ const ProductDetails: React.FC = () => {
     [id, products]
   );
 
-  // The catalogue is fetched when a product page opens, not at login.
+  // Fetched when a product page opens, not at login.
   useEffect(() => {
     void ensureProducts();
-  }, [ensureProducts]);
+    void ensureWishlist();
+  }, [ensureProducts, ensureWishlist]);
 
   useEffect(() => {
     if (!product) return;
@@ -269,6 +273,11 @@ const ProductDetails: React.FC = () => {
                     {!hasAuctionStarted(product) ? (
                       <p className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
                         Bidding opens {formatDateTime(product.auctionStartTime)}. You can place a bid once the auction starts.
+                      </p>
+                    ) : !isVerified ? (
+                      <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                        <AlertCircle className="h-4 w-4 shrink-0" />
+                        Verify your account to bid in auctions.
                       </p>
                     ) : (
                       <>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import Link from "next/link";
 import { useRouter } from "next/router";
 import {
@@ -11,12 +11,36 @@ import {
 } from 'lucide-react';
 import { useCart } from '../../context/CartContext';
 import { formatCurrency } from '../../utils/helpers';
+import { SkeletonCards } from '../../components/Skeleton';
 
 const Cart: React.FC = () => {
-  const { cart, removeFromCart, updateQty, cartTotal, cartCount } = useCart();
+  const { cart, loaded, error, ensureCart, refreshCart, removeFromCart, updateQty, cartTotal, cartCount } = useCart();
   const router = useRouter();
   const deliveryFee = cart.length > 0 ? 500 : 0;
   const grandTotal = cartTotal + deliveryFee;
+
+  // The cart is fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureCart();
+  }, [ensureCart]);
+
+  if (!loaded) {
+    return (
+      <div className="max-w-6xl mx-auto space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">Your Cart</h1>
+        <SkeletonCards count={3} className="space-y-4" label="Loading your cart" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-4xl mx-auto rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        {error}
+        <button onClick={() => void refreshCart()} className="ml-2 font-semibold underline">Retry</button>
+      </div>
+    );
+  }
 
   if (cart.length === 0) {
     return (

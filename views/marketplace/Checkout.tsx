@@ -27,6 +27,12 @@ const Checkout: React.FC = () => {
   const { cart, cartTotal, clearCart } = useCart();
   const { user } = useAuth();
   const { createCheckoutOrder } = useOrders();
+  const { ensureCart } = useCart();
+
+  // Checkout needs the cart contents, which load on open rather than at login.
+  useEffect(() => {
+    void ensureCart();
+  }, [ensureCart]);
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 

@@ -263,7 +263,15 @@ const Section: React.FC<{
 };
 
 const Marketplace: React.FC = () => {
+  const { ensureWishlist } = useWishlist();
   const [searchInput, setSearchInput] = useState('');
+
+  // Needed so the wishlist hearts on each card show the right state — fetched
+  // when the marketplace opens rather than at login.
+  useEffect(() => {
+    void ensureWishlist();
+  }, [ensureWishlist]);
+
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);

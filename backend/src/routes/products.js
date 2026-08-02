@@ -951,6 +951,18 @@ router.post("/:id/bids", requireRole("buyer"), async (req, res) => {
     const { rows: pRows } = await pool.query("SELECT * FROM products WHERE id = $1", [productId]);
     if (!pRows.length) return res.status(404).json({ message: "Product not found" });
 
+    // Only a verified account may bid. Checked server-side because hiding the
+    // form in the UI does not stop a direct request to this endpoint.
+    const { rows: bidderRows } = await pool.query("SELECT verified FROM users WHERE id = $1", [
+      req.actor.userId,
+    ]);
+    if (!bidderRows.length) return res.status(403).json({ message: "Bidder account not found" });
+    if (bidderRows[0].verified !== true) {
+      return res.status(403).json({
+        message: "Please verify your account before bidding in auctions.",
+      });
+    }
+
     const product = pRows[0];
     if (!product.is_auction) return res.status(400).json({ message: "Not an auction" });
     if (product.auction_status !== "live") return res.status(400).json({ message: "Auction is not live" });
@@ -975,15 +987,20 @@ router.post("/:id/bids", requireRole("buyer"), async (req, res) => {
     const bidId = uuidv4();
     const now = Date.now();
 
+    // The bidder is whoever is authenticated, never what the request claims —
+    // a body-supplied bidderId would let one buyer bid in another's name.
+    const bidderUserId = req.actor.userId;
+    const bidderDisplayName = req.actor.name || bidderName || "Buyer";
+
     await pool.query(
       `INSERT INTO bids (id, product_id, bidder_id, bidder_name, amount, created_at)
        VALUES ($1, $2, $3, $4, $5, $6)`,
-      [bidId, productId, bidderId || req.actor.userId, bidderName || req.actor.name, amount, now]
+      [bidId, productId, bidderUserId, bidderDisplayName, amount, now]
     );
 
     await pool.query(
       `UPDATE products SET current_highest_bid = $1, winner_bidder_id = $2, winner_bidder_name = $3, updated_at = $4 WHERE id = $5`,
-      [amount, bidderId || req.actor.userId, bidderName || req.actor.name, now, productId]
+      [amount, bidderUserId, bidderDisplayName, now, productId]
     );
 
     const bids = await getBidsForProduct(productId);

@@ -1,13 +1,37 @@
-import React from "react";
+import React, { useEffect } from "react";
 import Link from "next/link";
 import { Heart, ShoppingCart, Trash2 } from "lucide-react";
 import { useWishlist } from "../../context/WishlistContext";
 import { useCart } from "../../context/CartContext";
 import { formatCurrency } from "../../utils/helpers";
+import { SkeletonTiles } from "../../components/Skeleton";
 
 const Wishlist: React.FC = () => {
-  const { wishlist, removeFromWishlist } = useWishlist();
+  const { wishlist, loaded, error, ensureWishlist, refreshWishlist, removeFromWishlist } = useWishlist();
   const { addToCart } = useCart();
+
+  // The wishlist is fetched when this page opens, not at login.
+  useEffect(() => {
+    void ensureWishlist();
+  }, [ensureWishlist]);
+
+  if (!loaded) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">My Wishlist</h1>
+        <SkeletonTiles count={4} label="Loading your wishlist" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-4xl rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        {error}
+        <button onClick={() => void refreshWishlist()} className="ml-2 font-semibold underline">Retry</button>
+      </div>
+    );
+  }
 
   if (wishlist.length === 0) {
     return (
