@@ -68,6 +68,7 @@ function buildProductFilters(req, startIndex = 1) {
     vendorId,
     approvalStatus,
     productType,
+    isAuction,
     isActive,
     status,
     category,
@@ -106,6 +107,13 @@ function buildProductFilters(req, startIndex = 1) {
     }
     conditions.push(`p.product_type = $${i++}`);
     values.push(productType);
+  }
+
+  // `isAuction=false` is how the admin Products tab excludes auctions, which
+  // productType can't express — it names one type, not "either of the other two".
+  if (isAuction !== undefined && isAuction !== "") {
+    conditions.push(`p.is_auction = $${i++}`);
+    values.push(isAuction === "true");
   }
 
   if (status) {

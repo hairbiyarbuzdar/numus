@@ -105,7 +105,6 @@ const AdminApprovalsQueue: React.FC = () => {
     setPage(1);
   }, [tab, search, category, sort, pageSize]);
 
-  const productType = tab === "auctions" ? "auction" : undefined;
 
   useEffect(() => {
     if (mainTab !== "products") return;
@@ -116,7 +115,9 @@ const AdminApprovalsQueue: React.FC = () => {
     const shared = {
       search: search || undefined,
       category: category === "all" ? undefined : category,
-      productType,
+      // The Products tab excludes auctions, which have their own tab. Without
+      // this an auction awaiting review appeared under both.
+      ...(tab === "auctions" ? { productType: "auction" as const } : { isAuction: false }),
       sort,
     } as const;
 
@@ -145,7 +146,7 @@ const AdminApprovalsQueue: React.FC = () => {
       .finally(() => {
         if (requestId === requestIdRef.current) setQueueLoading(false);
       });
-  }, [mainTab, productType, search, category, sort, page, pageSize, refreshKey]);
+  }, [mainTab, tab, search, category, sort, page, pageSize, refreshKey]);
 
   useEffect(() => {
     let active = true;

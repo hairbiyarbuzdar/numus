@@ -93,6 +93,9 @@ const AdminProductsManager: React.FC = () => {
 
   const query = useMemo<ProductQuery>(
     () => ({
+      // Auctions belong to the Auctions tab. They used to appear here too,
+      // so the same listing showed up under both.
+      isAuction: false,
       search: search || undefined,
       vendorId: filters.vendorId === "all" ? undefined : filters.vendorId,
       category: filters.category === "all" ? undefined : filters.category,

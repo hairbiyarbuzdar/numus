@@ -35,6 +35,8 @@ export interface ProductQuery {
   isActive?: boolean;
   approvalStatus?: ProductApprovalStatus;
   productType?: ProductType;
+  /** `false` excludes auctions — what `productType` alone cannot express. */
+  isAuction?: boolean;
   category?: string;
   minPrice?: number;
   maxPrice?: number;

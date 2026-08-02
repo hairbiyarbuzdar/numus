@@ -26,6 +26,8 @@
 
 ### Admin
 
+- **Auctions appeared in the Products tab as well as the Auctions tab** — Fixed. The Products tab and the Products side of the Approvals queue now exclude auctions, so each listing appears under one tab only. Added an `isAuction` filter to the products API: `productType` names a single type and cannot express "anything except auctions".
+- **Auctions table action icons missing tooltips** — Fixed. Close, Cancel and Delete all carry a tooltip and a screen-reader label naming the auction; Delete had no tooltip at all.
 - **Products page had no server-side pagination, search or filtering** — Fixed. The page pulled the whole catalogue and filtered it in the browser; it now pages from the API with search (title, vendor, category, ID), farmer, category, approval, status and visibility filters, sorting and rows-per-page, all combining server-side. Approval, publication status and visibility are separate controls now — the single dropdown could not express three independent states.
 - **Action icons had no tooltips** — Fixed. Every icon in the Actions column has a hover tooltip and a screen-reader label naming the product it acts on. Approve and Reject are disabled when the product is already in that state, and a row’s buttons are disabled while one of its actions is in flight so a double click cannot fire twice.
 - **Module APIs fired on login instead of on demand** — Fixed. The expired-auction settlement job used to run at sign-in and every 15 seconds from whatever page the admin was on, from every open tab. It now runs only while the Auctions page is open. The Approvals queue no longer pulls the whole catalogue either, and deep links fetch the single product they reference.

@@ -493,7 +493,8 @@ const AdminAuctionsManager: React.FC = () => {
                     </button>
                     <button
                       onClick={() => void handleClose(auction)}
-                      title={isRunning ? "Close auction" : "Only an approved, running auction can be closed"}
+                      title={isRunning ? "Close auction now and pick a winner" : "Only an approved, running auction can be closed"}
+                      aria-label={`Close the auction for ${auction.title}`}
                       className="rounded-md border border-emerald-300 p-1.5 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40"
                       disabled={!isRunning}
                     >
@@ -501,13 +502,19 @@ const AdminAuctionsManager: React.FC = () => {
                     </button>
                     <button
                       onClick={() => void handleCancel(auction)}
-                      title={isRunning ? "Cancel auction" : "Only an approved, running auction can be cancelled"}
+                      title={isRunning ? "Cancel auction without a winner" : "Only an approved, running auction can be cancelled"}
+                      aria-label={`Cancel the auction for ${auction.title}`}
                       className="rounded-md border border-amber-300 p-1.5 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
                       disabled={!isRunning}
                     >
                       <XCircle className="h-4 w-4" />
                     </button>
-                    <button onClick={() => setDeleteTarget(auction)} className="rounded-md border border-red-300 p-1.5 text-red-700 hover:bg-red-50">
+                    <button
+                      onClick={() => setDeleteTarget(auction)}
+                      title="Delete auction permanently"
+                      aria-label={`Delete the auction for ${auction.title}`}
+                      className="rounded-md border border-red-300 p-1.5 text-red-700 hover:bg-red-50"
+                    >
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
