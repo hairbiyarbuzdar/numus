@@ -141,6 +141,11 @@ export const productApi = {
   },
 
   // `productType` scopes the options (e.g. only categories that auctions use).
+  /** Single product by id — avoids pulling a list to resolve one row. */
+  getProduct(productId: string, actor?: ApiActor) {
+    return apiClient.get<Product>(`/products/${productId}`, { actor });
+  },
+
   listFilterOptions(query: Pick<ProductQuery, "productType"> = {}, actor?: ApiActor) {
     return apiClient.get<ProductFilterOptions>(
       `/products/filter-options${buildQueryString(query)}`,

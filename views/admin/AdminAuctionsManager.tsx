@@ -13,6 +13,7 @@ import {
 import ConfirmModal from "../../components/ConfirmModal";
 import { Product } from "../../types";
 import { useProducts } from "../../context/ProductContext";
+import { useOrders } from "../../context/OrdersContext";
 import {
   AuctionState,
   PaginatedProducts,
@@ -60,6 +61,8 @@ const DATE_FIELD_OPTIONS: { value: ProductDateField; label: string }[] = [
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const SEARCH_DEBOUNCE_MS = 400;
+/** How often this page re-checks for auctions that have run past their end time. */
+const SETTLE_INTERVAL_MS = 30000;
 
 const LABEL_CLASS = "mb-1 block text-sm font-medium text-slate-700";
 const CONTROL_CLASS =
@@ -112,6 +115,7 @@ const Fact: React.FC<{ label: string; value: string }> = ({ label, value }) => (
 
 const AdminAuctionsManager: React.FC = () => {
   const { closeAuction, cancelAuction, deleteProduct } = useProducts();
+  const { settleAuctions } = useOrders();
 
   // ─── Search / filter / pagination state ────────────────────────────────────
   const [searchInput, setSearchInput] = useState("");
@@ -201,6 +205,27 @@ const AdminAuctionsManager: React.FC = () => {
   }, [refreshKey]);
 
   const refresh = useCallback(() => setRefreshKey((prev) => prev + 1), []);
+
+  /**
+   * Settling expired auctions is this page's job, not something the whole app
+   * does on a timer. It runs when the page opens and keeps ticking only while
+   * the page is on screen; anything it closes is picked up by the reload.
+   */
+  useEffect(() => {
+    let active = true;
+
+    const run = async () => {
+      await settleAuctions();
+      if (active) refresh();
+    };
+
+    void run();
+    const timer = setInterval(() => void run(), SETTLE_INTERVAL_MS);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [refresh, settleAuctions]);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));

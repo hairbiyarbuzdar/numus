@@ -1,28 +1,53 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
-import { CheckCircle2, XCircle, Clock, Gavel, Package, AlertTriangle, Eye, UserCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  Eye,
+  Gavel,
+  Loader2,
+  Package,
+  Search,
+  UserCheck,
+  XCircle,
+} from "lucide-react";
 import { useProducts } from "../../context/ProductContext";
 import { Product } from "../../types";
-import { formatCurrency } from "../../utils/helpers";
+import { buildPageList, formatCurrency } from "../../utils/helpers";
 import AdminVendorApprovalsQueue from "./AdminVendorApprovalsQueue";
 import { SkeletonCards } from "../../components/Skeleton";
+import { PaginatedProducts, ProductSort, productApi } from "../../services/productApi";
 
 type TabKey = "products" | "auctions";
 type MainTabKey = "products" | "vendors";
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
+const SEARCH_DEBOUNCE_MS = 400;
+
 const AdminApprovalsQueue: React.FC = () => {
   const router = useRouter();
-  const { products, loaded: productsLoaded, ensureProducts, approveProduct, rejectProduct } = useProducts();
+  // Only the actions come from the context — the queue itself is paged from the
+  // API, so opening this page no longer pulls the whole catalogue.
+  const { approveProduct, rejectProduct } = useProducts();
   const [mainTab, setMainTab] = useState<MainTabKey>("products");
   const [tab, setTab] = useState<TabKey>("products");
   const [selectedItem, setSelectedItem] = useState<Product | null>(null);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  // Which submission is being approved/rejected. The ref is what actually stops
+  // a double click — two clicks in one tick would both read a stale state flag.
+  const [actingOn, setActingOn] = useState<string | null>(null);
+  const actingRef = useRef<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
-  // Fetched when this queue opens, not at login.
   useEffect(() => {
-    void ensureProducts();
-  }, [ensureProducts]);
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     const section = router.query.section;
@@ -47,43 +72,121 @@ const AdminApprovalsQueue: React.FC = () => {
     }
   }, [router.query.tab]);
 
-  const pendingProducts = useMemo(
-    () => products.filter((p) => !p.isAuction && p.approvalStatus === "pending" && p.status !== "draft"),
-    [products]
-  );
+  // ─── Server-side queue ─────────────────────────────────────────────────────
+  // The queue is fetched a page at a time rather than filtered out of the whole
+  // catalogue in the browser, so it stays usable as submissions pile up.
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+  const [sort, setSort] = useState<ProductSort>("oldest");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+  const [queue, setQueue] = useState<PaginatedProducts | null>(null);
+  const [rejected, setRejected] = useState<PaginatedProducts | null>(null);
+  const [counts, setCounts] = useState({ products: 0, auctions: 0 });
+  const [queueLoading, setQueueLoading] = useState(true);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const requestIdRef = useRef(0);
 
-  const pendingAuctions = useMemo(
-    () => products.filter((p) => p.isAuction && p.approvalStatus === "pending" && p.status !== "draft"),
-    [products]
-  );
+  const refreshQueue = useCallback(() => setRefreshKey((prev) => prev + 1), []);
 
-  const rejectedProducts = useMemo(
-    () => products.filter((p) => !p.isAuction && p.approvalStatus === "rejected"),
-    [products]
-  );
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
 
-  const rejectedAuctions = useMemo(
-    () => products.filter((p) => p.isAuction && p.approvalStatus === "rejected"),
-    [products]
-  );
+  // Switching tab or filters starts the queue over.
+  useEffect(() => {
+    setPage(1);
+  }, [tab, search, category, sort, pageSize]);
 
-  const currentPending = tab === "products" ? pendingProducts : pendingAuctions;
-  const currentRejected = tab === "products" ? rejectedProducts : rejectedAuctions;
+  const productType = tab === "auctions" ? "auction" : undefined;
 
+  useEffect(() => {
+    if (mainTab !== "products") return;
+
+    const requestId = ++requestIdRef.current;
+    setQueueLoading(true);
+
+    const shared = {
+      search: search || undefined,
+      category: category === "all" ? undefined : category,
+      productType,
+      sort,
+    } as const;
+
+    Promise.all([
+      productApi.listProductsPage({ ...shared, approvalStatus: "pending", page, pageSize }),
+      productApi.listProductsPage({ ...shared, approvalStatus: "rejected", page: 1, pageSize: 5 }),
+      productApi.listProductsPage({ approvalStatus: "pending", page: 1, pageSize: 1 }),
+      productApi.listProductsPage({ approvalStatus: "pending", productType: "auction", page: 1, pageSize: 1 }),
+    ])
+      .then(([pendingPage, rejectedPage, allPending, pendingAuctionsPage]) => {
+        if (requestId !== requestIdRef.current) return;
+        setQueue(pendingPage);
+        setRejected(rejectedPage);
+        setCounts({
+          products: allPending.total - pendingAuctionsPage.total,
+          auctions: pendingAuctionsPage.total,
+        });
+        setQueueError(null);
+        if (pendingPage.page !== page) setPage(pendingPage.page);
+      })
+      .catch((err) => {
+        if (requestId !== requestIdRef.current) return;
+        setQueue(null);
+        setQueueError(err instanceof Error ? err.message : "Failed to load the approvals queue.");
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) setQueueLoading(false);
+      });
+  }, [mainTab, productType, search, category, sort, page, pageSize, refreshKey]);
+
+  useEffect(() => {
+    let active = true;
+    productApi
+      .listFilterOptions()
+      .then((options) => {
+        if (active) setCategories(options.categories);
+      })
+      .catch(() => {
+        if (active) setCategories([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currentPending = queue?.data ?? [];
+  const currentRejected = rejected?.data ?? [];
+  const hasQuery = Boolean(search) || category !== "all";
+
+  // A deep link (?productId=…) fetches that one row rather than pulling the
+  // whole catalogue in to find it.
   useEffect(() => {
     const productId = router.query.productId;
     const targetId = Array.isArray(productId) ? productId[0] : productId;
-    if (!targetId) return;
+    if (!targetId || selectedItem?.id === targetId) return;
 
-    const match = products.find((product) => product.id === targetId);
-    if (!match) return;
-    setSelectedItem(match);
-    if (match.isAuction) {
-      setTab("auctions");
-    } else {
-      setTab("products");
-    }
-  }, [products, router.query.productId]);
+    let active = true;
+    productApi
+      .getProduct(targetId)
+      .then((match) => {
+        if (!active) return;
+        setSelectedItem(match);
+        setTab(match.isAuction ? "auctions" : "products");
+      })
+      .catch(() => undefined);
+
+    return () => {
+      active = false;
+    };
+  }, [router.query.productId, selectedItem?.id]);
 
   const openDetails = (item: Product) => {
     setSelectedItem(item);
@@ -125,27 +228,54 @@ const AdminApprovalsQueue: React.FC = () => {
     );
   };
 
-  const handleApprove = async (productId: string) => {
+  /**
+   * One request per click: the id of the item being acted on is held in state
+   * and its buttons are disabled while the request is in flight, and the ref
+   * blocks a second click landing in the same tick before the re-render.
+   */
+  const handleApprove = async (item: Product) => {
+    if (actingRef.current) return;
+    actingRef.current = item.id;
+    setActingOn(item.id);
+
     try {
-      await approveProduct(productId);
-      if (selectedItem?.id === productId) {
-        closeDetails();
-      }
+      await approveProduct(item.id);
+      if (selectedItem?.id === item.id) closeDetails();
+      setNotice({ tone: "success", message: `"${item.title}" approved and published.` });
+      refreshQueue();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to approve product.");
+      setNotice({
+        tone: "error",
+        message: err instanceof Error ? err.message : "Failed to approve the submission.",
+      });
+    } finally {
+      actingRef.current = null;
+      setActingOn(null);
     }
   };
 
   const handleReject = async (productId: string) => {
+    if (actingRef.current) return;
+    actingRef.current = productId;
+    setActingOn(productId);
+
+    const item = currentPending.find((entry) => entry.id === productId) || selectedItem;
+
     try {
       await rejectProduct(productId, rejectReason || "Rejected by admin");
-      if (selectedItem?.id === productId) {
-        closeDetails();
-      }
+      if (selectedItem?.id === productId) closeDetails();
       setRejectTarget(null);
       setRejectReason("");
+      setNotice({ tone: "success", message: `"${item?.title ?? "Submission"}" rejected.` });
+      refreshQueue();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to reject product.");
+      setNotice({
+        tone: "error",
+        message: err instanceof Error ? err.message : "Failed to reject the submission.",
+      });
+    } finally {
+      actingRef.current = null;
+      setActingOn(null);
     }
   };
 
@@ -154,18 +284,47 @@ const AdminApprovalsQueue: React.FC = () => {
       key: "products",
       label: "Products",
       icon: <Package className="h-4 w-4" />,
-      pending: pendingProducts.length,
+      pending: counts.products,
     },
     {
       key: "auctions",
       label: "Auctions",
       icon: <Gavel className="h-4 w-4" />,
-      pending: pendingAuctions.length,
+      pending: counts.auctions,
     },
   ];
 
   return (
     <div className="space-y-5">
+      {/* Result of the last approve/reject — the admin previously got no
+          confirmation at all, only an alert() when something failed. */}
+      {notice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed right-6 top-20 z-[95] flex max-w-sm items-start gap-2 rounded-xl border px-4 py-3 text-sm shadow-lg ${
+            notice.tone === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "border-red-200 bg-red-50 text-red-800"
+          }`}
+        >
+          {notice.tone === "success" ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : (
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
+          <span>{notice.message}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss notification"
+            className="ml-1 shrink-0 opacity-60 hover:opacity-100"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       <div className="flex gap-2 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-fit">
         <button
           onClick={() => handleMainTabChange("products")}
@@ -206,11 +365,11 @@ const AdminApprovalsQueue: React.FC = () => {
 
         <div className="mt-4 flex gap-4">
           <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-center">
-            <p className="text-2xl font-bold text-amber-300">{pendingProducts.length}</p>
+            <p className="text-2xl font-bold text-amber-300">{counts.products}</p>
             <p className="text-xs text-amber-200/60">Products Pending</p>
           </div>
           <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-center">
-            <p className="text-2xl font-bold text-cyan-300">{pendingAuctions.length}</p>
+            <p className="text-2xl font-bold text-cyan-300">{counts.auctions}</p>
             <p className="text-xs text-cyan-200/60">Auctions Pending</p>
           </div>
         </div>
@@ -236,12 +395,78 @@ const AdminApprovalsQueue: React.FC = () => {
         ))}
       </div>
 
-      {!productsLoaded && <SkeletonCards count={3} className="space-y-3" label="Loading submissions awaiting review" />}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex-1">
+            <label htmlFor="approvals-search" className="mb-1 block text-sm font-medium text-slate-700">Search</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                id="approvals-search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Title, vendor, category or ID"
+                className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+          <div className="sm:w-52">
+            <label htmlFor="approvals-category" className="mb-1 block text-sm font-medium text-slate-700">Category</label>
+            <select
+              id="approvals-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="all">All categories</option>
+              {categories.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:w-48">
+            <label htmlFor="approvals-sort" className="mb-1 block text-sm font-medium text-slate-700">Sort by</label>
+            <select
+              id="approvals-sort"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as ProductSort)}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="oldest">Oldest first (longest waiting)</option>
+              <option value="newest">Newest first</option>
+              <option value="title_asc">Title (A–Z)</option>
+            </select>
+          </div>
+          {hasQuery && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setSearch("");
+                setCategory("all");
+                setPage(1);
+              }}
+              className="text-sm font-medium text-amber-700 hover:text-amber-800"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </section>
 
-      {productsLoaded && currentPending.length > 0 && (
+      {queueError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {queueError}
+          <button onClick={refreshQueue} className="ml-2 font-semibold underline">Retry</button>
+        </div>
+      )}
+
+      {queueLoading && !queue && <SkeletonCards count={3} className="space-y-3" label="Loading submissions awaiting review" />}
+
+      {queue && currentPending.length > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
-            Awaiting Review ({currentPending.length})
+            Awaiting Review ({queue.total})
           </h2>
           <div className="space-y-3">
             {currentPending.map((item) => (
@@ -282,18 +507,24 @@ const AdminApprovalsQueue: React.FC = () => {
                     View Details
                   </button>
                   <button
-                    onClick={() => void handleApprove(item.id)}
-                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+                    onClick={() => void handleApprove(item)}
+                    disabled={actingOn !== null}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <CheckCircle2 className="h-4 w-4" />
-                    Approve
+                    {actingOn === item.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+                    {actingOn === item.id ? "Approving…" : "Approve"}
                   </button>
                   <button
                     onClick={() => {
                       setRejectTarget(item.id);
                       setRejectReason("");
                     }}
-                    className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50"
+                    disabled={actingOn !== null}
+                    className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <XCircle className="h-4 w-4" />
                     Reject
@@ -302,14 +533,74 @@ const AdminApprovalsQueue: React.FC = () => {
               </div>
             ))}
           </div>
+
+          {queue.totalPages > 1 && (
+            <div className="mt-4 flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 sm:flex-row">
+              <label htmlFor="approvals-page-size" className="flex items-center gap-2 text-sm text-slate-600">
+                <span className="font-medium text-slate-700">Per page</span>
+                <select
+                  id="approvals-page-size"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1"
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <span className="text-slate-500">of {queue.total}</span>
+              </label>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+                  disabled={page <= 1 || queueLoading}
+                  aria-label="Previous page"
+                  className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft className="h-4 w-4" /> Prev
+                </button>
+                {buildPageList(page, queue.totalPages).map((entry, idx) =>
+                  entry === "gap" ? (
+                    <span key={`gap-${idx}`} className="px-2 text-sm text-slate-400">…</span>
+                  ) : (
+                    <button
+                      key={entry}
+                      type="button"
+                      onClick={() => setPage(entry)}
+                      disabled={queueLoading}
+                      aria-current={entry === page ? "page" : undefined}
+                      className={`min-w-[36px] rounded-lg border px-2 py-1.5 text-sm ${
+                        entry === page ? "border-amber-500 bg-amber-500 text-white" : "border-slate-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      {entry}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPage((prev) => Math.min(prev + 1, queue.totalPages))}
+                  disabled={page >= queue.totalPages || queueLoading}
+                  aria-label="Next page"
+                  className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
-      {productsLoaded && currentPending.length === 0 && (
+      {queue && currentPending.length === 0 && (
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-8 text-center">
           <CheckCircle2 className="mx-auto mb-3 h-10 w-10 text-emerald-400" />
-          <p className="font-semibold text-emerald-800">All caught up</p>
-          <p className="mt-1 text-sm text-emerald-600">No pending {tab} awaiting review.</p>
+          <p className="font-semibold text-emerald-800">{hasQuery ? "Nothing matches" : "All caught up"}</p>
+          <p className="mt-1 text-sm text-emerald-600">
+            {hasQuery ? `No pending ${tab} match your search.` : `No pending ${tab} awaiting review.`}
+          </p>
         </div>
       )}
 
@@ -342,7 +633,7 @@ const AdminApprovalsQueue: React.FC = () => {
                     View details
                   </button>
                   <button
-                    onClick={() => void handleApprove(item.id)}
+                    onClick={() => void handleApprove(item)}
                     className="rounded-lg border border-emerald-300 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
                   >
                     Re-approve
@@ -445,7 +736,7 @@ const AdminApprovalsQueue: React.FC = () => {
                 Reject
               </button>
               <button
-                onClick={() => void handleApprove(selectedItem.id)}
+                onClick={() => void handleApprove(selectedItem)}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
               >
                 Approve and publish

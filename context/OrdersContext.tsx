@@ -33,6 +33,11 @@ interface OrdersContextType {
   createCheckoutOrder: (payload: CreateCheckoutOrderPayload) => Promise<string>;
   updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<void>;
   markNotificationRead: (notificationId: string) => void;
+  /**
+   * Closes auctions past their end time and raises an order for each winner.
+   * Admin-only and driven by the Auctions page rather than a global timer.
+   */
+  settleAuctions: () => Promise<void>;
 }
 
 const NOTIF_STORAGE_KEY = "kissanhub_notifications";
@@ -225,14 +230,10 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [user?.role, user?.userType]);
 
-  useEffect(() => {
-    if (!hydrated) return;
-    void settleAuctions();
-    const timer = setInterval(() => {
-      void settleAuctions();
-    }, SETTLE_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [hydrated, settleAuctions]);
+  // Deliberately not run on a global timer. It used to fire on sign-in and
+  // every 15 seconds from whatever page the admin happened to be on, which is
+  // a POST from every open tab regardless of what the admin was doing. The
+  // Auctions page drives it now — see AdminAuctionsManager.
 
   const value = useMemo(
     () => ({
@@ -246,6 +247,7 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       createCheckoutOrder,
       updateOrderStatus,
       markNotificationRead,
+      settleAuctions,
     }),
     [
       createCheckoutOrder,
@@ -257,6 +259,7 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       notifications,
       orders,
       refreshOrders,
+      settleAuctions,
       updateOrderStatus,
     ]
   );
