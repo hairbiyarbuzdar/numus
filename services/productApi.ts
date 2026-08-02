@@ -31,6 +31,8 @@ export interface ProductQuery {
   search?: string;
   vendorId?: string;
   status?: ProductStatus;
+  /** Marketplace visibility — true is shown to buyers, false is hidden. */
+  isActive?: boolean;
   approvalStatus?: ProductApprovalStatus;
   productType?: ProductType;
   category?: string;

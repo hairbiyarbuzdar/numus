@@ -26,6 +26,8 @@
 
 ### Admin
 
+- **Products page had no server-side pagination, search or filtering** — Fixed. The page pulled the whole catalogue and filtered it in the browser; it now pages from the API with search (title, vendor, category, ID), farmer, category, approval, status and visibility filters, sorting and rows-per-page, all combining server-side. Approval, publication status and visibility are separate controls now — the single dropdown could not express three independent states.
+- **Action icons had no tooltips** — Fixed. Every icon in the Actions column has a hover tooltip and a screen-reader label naming the product it acts on. Approve and Reject are disabled when the product is already in that state, and a row’s buttons are disabled while one of its actions is in flight so a double click cannot fire twice.
 - **Module APIs fired on login instead of on demand** — Fixed. The expired-auction settlement job used to run at sign-in and every 15 seconds from whatever page the admin was on, from every open tab. It now runs only while the Auctions page is open. The Approvals queue no longer pulls the whole catalogue either, and deep links fetch the single product they reference.
 - **Approve/Reject allowed multiple clicks with no feedback** — Fixed. The buttons disable and show a spinner while the request is in flight, a ref guard blocks a second click in the same tick, and the result is confirmed with a success or error notification instead of nothing.
 - **Approvals page missing pagination, search and filtering** — Fixed. The queue is paged from the API with search by title, vendor, category or ID, a category filter and sorting (longest waiting first by default). Pending counts on the tabs and header come from the server, so they stay right across pages.
