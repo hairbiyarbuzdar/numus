@@ -26,6 +26,7 @@
 
 ### Admin
 
+- **Manage Farmers / Customers had no server-side pagination, search or filtering** — Fixed. Both pages page from the API with search (name, email, phone, city), account type and status filters, sorting and rows-per-page, all applied server-side. The users API accepts a comma-separated type list so "All Users" means farmers and customers without pulling staff accounts. Deactivating a farmer still hides their listings, and a row’s buttons are disabled while its action is in flight.
 - **Auctions appeared in the Products tab as well as the Auctions tab** — Fixed. The Products tab and the Products side of the Approvals queue now exclude auctions, so each listing appears under one tab only. Added an `isAuction` filter to the products API: `productType` names a single type and cannot express "anything except auctions".
 - **Auctions table action icons missing tooltips** — Fixed. Close, Cancel and Delete all carry a tooltip and a screen-reader label naming the auction; Delete had no tooltip at all.
 - **Products page had no server-side pagination, search or filtering** — Fixed. The page pulled the whole catalogue and filtered it in the browser; it now pages from the API with search (title, vendor, category, ID), farmer, category, approval, status and visibility filters, sorting and rows-per-page, all combining server-side. Approval, publication status and visibility are separate controls now — the single dropdown could not express three independent states.

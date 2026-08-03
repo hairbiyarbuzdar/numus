@@ -377,12 +377,21 @@ router.get("/users", requireRole("superAdmin"), async (req, res) => {
     const values = [];
     let i = 1;
 
+    // Accepts a single type or a comma-separated list, so the users screens can
+    // ask for "farmers and customers" without also pulling staff accounts.
     if (userType) {
-      if (!VALID_USER_TYPES.includes(userType)) {
+      const requested = String(userType)
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean);
+
+      const invalid = requested.filter((value) => !VALID_USER_TYPES.includes(value));
+      if (!requested.length || invalid.length) {
         return res.status(400).json({ message: `userType must be one of: ${VALID_USER_TYPES.join(", ")}` });
       }
-      conditions.push(`user_type = $${i++}`);
-      values.push(userType);
+
+      conditions.push(`user_type = ANY($${i++})`);
+      values.push(requested);
     }
 
     if (isActive !== undefined) {
