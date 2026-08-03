@@ -257,6 +257,13 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     try {
       const results = await productApi.closeExpiredAuctions(actor);
+
+      // Nothing closed is the normal case. Skipping the state update matters:
+      // mergeProducts always returns a fresh array, so writing it every time
+      // changed the context value and re-rendered every consumer in the app
+      // for no reason.
+      if (!results.length) return [];
+
       setProducts((prev) => mergeProducts(prev, results.map((entry) => entry.product)));
       setError(null);
       return results.map((entry) => ({

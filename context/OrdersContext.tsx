@@ -36,8 +36,10 @@ interface OrdersContextType {
   /**
    * Closes auctions past their end time and raises an order for each winner.
    * Admin-only and driven by the Auctions page rather than a global timer.
+   * Resolves with how many auctions were settled, so the caller can avoid
+   * reloading anything when the answer is none.
    */
-  settleAuctions: () => Promise<void>;
+  settleAuctions: () => Promise<number>;
 }
 
 const NOTIF_STORAGE_KEY = "kissanhub_notifications";
@@ -147,9 +149,9 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
    * `closeExpiredAuctions` already no-ops for other roles. The right long-term
    * home for this is the backend close-expired-auctions job — see CHANGES.md.
    */
-  const settleAuctions = useCallback(async () => {
+  const settleAuctions = useCallback(async (): Promise<number> => {
     const isAdmin = user?.role === "superAdmin" || user?.userType === "admin";
-    if (!isAdmin) return;
+    if (!isAdmin) return 0;
 
     const currentProducts = productsRef.current;
     const endedAuctions = await closeExpiredAuctionsRef.current();
@@ -166,8 +168,9 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       allEndedMap.set(entry.auctionId, entry);
     });
     const allEnded = Array.from(allEndedMap.values());
-    if (!allEnded.length) return;
+    if (!allEnded.length) return 0;
 
+    let settled = 0;
     for (const ended of allEnded) {
       if (!ended.winnerBidderId) continue;
       const auction = currentProducts.find((product) => product.id === ended.auctionId);
@@ -223,11 +226,14 @@ export const OrdersProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           },
           ...prev,
         ]);
+        settled += 1;
       } catch {
-        // A failed settlement is retried on the next tick rather than surfaced —
+        // A failed settlement is left for the next run rather than surfaced —
         // the auction stays without a winner order until it succeeds.
       }
     }
+
+    return settled;
   }, [user?.role, user?.userType]);
 
   // Deliberately not run on a global timer. It used to fire on sign-in and

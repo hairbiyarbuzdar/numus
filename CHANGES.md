@@ -26,6 +26,7 @@
 
 ### Admin
 
+- **Close/expired-auctions API polled on a timer and re-rendered the app** — Fixed. It no longer polls: it runs once when the Auctions page opens and otherwise only when the admin presses Refresh. The bigger cost was that each call wrote a freshly built product array into the shared context even when nothing had closed, re-rendering every screen using it — the state is now left untouched unless an auction actually closed, and the table reloads only then.
 - **Approved Listings page had no pagination** — Fixed. The page rendered every approved listing in one table, pulled from the whole catalogue in the browser. It now requests one page at a time from the API with next/previous, numbered pages and a rows-per-page control.
 - **Manage Farmers / Customers had no server-side pagination, search or filtering** — Fixed. Both pages page from the API with search (name, email, phone, city), account type and status filters, sorting and rows-per-page, all applied server-side. The users API accepts a comma-separated type list so "All Users" means farmers and customers without pulling staff accounts. Deactivating a farmer still hides their listings, and a row’s buttons are disabled while its action is in flight.
 - **Auctions appeared in the Products tab as well as the Auctions tab** — Fixed. The Products tab and the Products side of the Approvals queue now exclude auctions, so each listing appears under one tab only. Added an `isAuction` filter to the products API: `productType` names a single type and cannot express "anything except auctions".

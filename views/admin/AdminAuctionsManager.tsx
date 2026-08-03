@@ -6,6 +6,7 @@ import {
   Filter,
   Gavel,
   Loader2,
+  RefreshCw,
   Search,
   Trash2,
   XCircle,
@@ -61,8 +62,6 @@ const DATE_FIELD_OPTIONS: { value: ProductDateField; label: string }[] = [
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 const SEARCH_DEBOUNCE_MS = 400;
-/** How often this page re-checks for auctions that have run past their end time. */
-const SETTLE_INTERVAL_MS = 30000;
 
 const LABEL_CLASS = "mb-1 block text-sm font-medium text-slate-700";
 const CONTROL_CLASS =
@@ -207,25 +206,31 @@ const AdminAuctionsManager: React.FC = () => {
   const refresh = useCallback(() => setRefreshKey((prev) => prev + 1), []);
 
   /**
-   * Settling expired auctions is this page's job, not something the whole app
-   * does on a timer. It runs when the page opens and keeps ticking only while
-   * the page is on screen; anything it closes is picked up by the reload.
+   * Settling expired auctions runs once when this page opens, and otherwise
+   * only when the admin asks for it.
+   *
+   * It used to poll on a timer, which meant a request every few seconds for a
+   * result that is almost always "nothing changed" — and each one re-rendered
+   * the page. The table is only reloaded when something actually closed.
    */
-  useEffect(() => {
-    let active = true;
+  const [settling, setSettling] = useState(false);
 
-    const run = async () => {
-      await settleAuctions();
-      if (active) refresh();
-    };
-
-    void run();
-    const timer = setInterval(() => void run(), SETTLE_INTERVAL_MS);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
+  const runSettlement = useCallback(async () => {
+    setSettling(true);
+    try {
+      const settled = await settleAuctions();
+      if (settled > 0) refresh();
+      return settled;
+    } finally {
+      setSettling(false);
+    }
   }, [refresh, settleAuctions]);
+
+  useEffect(() => {
+    void runSettlement();
+    // Once per visit to this page — deliberately not on an interval.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -352,6 +357,23 @@ const AdminAuctionsManager: React.FC = () => {
                 {activeFilterCount}
               </span>
             )}
+          </button>
+
+          {/* Replaces the old background polling: closing expired auctions is
+              on demand now, so nothing runs while the admin is idle. */}
+          <button
+            type="button"
+            onClick={() => {
+              void runSettlement();
+              refresh();
+            }}
+            disabled={settling || loading}
+            title="Reload the list and close any auctions past their end time"
+            aria-label="Refresh auctions and close expired ones"
+            className="flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${settling ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
           </button>
         </div>
 
