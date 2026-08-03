@@ -30,6 +30,56 @@ router.get("/", async (req, res) => {
   }
 });
 
+// ─── GET /notifications/reads ─────────────────────────────────────────────────
+// Keys the caller has already read in the derived admin feed. That feed is
+// rebuilt from users/products/orders on each load, so its read state cannot
+// live on a notification row — it is keyed by entry instead.
+router.get("/reads", async (req, res) => {
+  try {
+    if (!req.actor.userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const { rows } = await pool.query(
+      "SELECT notification_key FROM notification_reads WHERE user_id = $1",
+      [req.actor.userId]
+    );
+    res.json({ keys: rows.map((row) => row.notification_key) });
+  } catch (err) {
+    console.error("GET /notifications/reads error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ─── POST /notifications/reads ────────────────────────────────────────────────
+// Body: { keys: string[] } — marks one entry or the whole feed as read.
+router.post("/reads", async (req, res) => {
+  try {
+    if (!req.actor.userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const keys = Array.isArray(req.body.keys) ? req.body.keys : [];
+    const usable = keys.filter((key) => typeof key === "string" && key.length && key.length <= 256);
+
+    if (usable.length) {
+      const now = Date.now();
+      // One statement rather than a loop: "mark all as read" can be hundreds.
+      await pool.query(
+        `INSERT INTO notification_reads (user_id, notification_key, read_at)
+         SELECT $1, UNNEST($2::text[]), $3
+         ON CONFLICT (user_id, notification_key) DO NOTHING`,
+        [req.actor.userId, usable, now]
+      );
+    }
+
+    const { rows } = await pool.query(
+      "SELECT notification_key FROM notification_reads WHERE user_id = $1",
+      [req.actor.userId]
+    );
+    res.status(201).json({ keys: rows.map((row) => row.notification_key) });
+  } catch (err) {
+    console.error("POST /notifications/reads error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // ─── PATCH /notifications/read-all (must be before /:id/read) ────────────────
 router.patch("/read-all", async (req, res) => {
   try {

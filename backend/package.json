@@ -13,7 +13,8 @@
     "migrate:product-status": "node src/db/migrate-product-status.js",
     "migrate:auction-filters": "node src/db/migrate-auction-filters.js",
     "migrate:attachments": "node src/db/migrate-attachments.js",
-    "migrate:cart-wishlist": "node src/db/migrate-cart-wishlist.js"
+    "migrate:cart-wishlist": "node src/db/migrate-cart-wishlist.js",
+    "migrate:notification-reads": "node src/db/migrate-notification-reads.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

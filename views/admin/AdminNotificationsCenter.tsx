@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { Bell, UserPlus, Package, ShoppingCart, Gavel, CheckCheck, Filter } from "lucide-react";
 import { SkeletonLines } from "../../components/Skeleton";
+import { notificationApi } from "../../services/notificationApi";
 import { useUsers } from "../../context/UsersContext";
 import { useProducts } from "../../context/ProductContext";
 import { useOrders } from "../../context/OrdersContext";
@@ -49,11 +50,42 @@ const AdminNotificationsCenter: React.FC = () => {
   const [filter, setFilter] = useState<NotifType>("all");
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
 
-  const markRead = (id: string) => setReadIds((prev) => new Set(prev).add(id));
-  const markAllRead = () => {
-    const allIds = derived.map((n) => n.id);
-    setReadIds(new Set(allIds));
-  };
+  // Read state used to be component state only, so every refresh made read
+  // notifications unread again. It is stored against the account now.
+  useEffect(() => {
+    let active = true;
+    notificationApi
+      .getReadKeys()
+      .then((response) => {
+        if (active) setReadIds(new Set(response.keys));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /** Optimistic locally, then persisted; a failed save is rolled back. */
+  const persistRead = useCallback((keys: string[]) => {
+    if (!keys.length) return;
+
+    setReadIds((prev) => {
+      const next = new Set(prev);
+      keys.forEach((key) => next.add(key));
+      return next;
+    });
+
+    void notificationApi.markRead(keys).catch(() => {
+      setReadIds((prev) => {
+        const next = new Set(prev);
+        keys.forEach((key) => next.delete(key));
+        return next;
+      });
+    });
+  }, []);
+
+  const markRead = (id: string) => persistRead([id]);
+  const markAllRead = () => persistRead(derived.filter((n) => !readIds.has(n.id)).map((n) => n.id));
 
   const derived = useMemo<DerivedNotif[]>(() => {
     const list: DerivedNotif[] = [];

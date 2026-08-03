@@ -36,6 +36,7 @@ echo "==> Running database migrations"
   && npm run migrate:product-status \
   && npm run migrate:auction-filters \
   && npm run migrate:cart-wishlist \
+  && npm run migrate:notification-reads \
   && npm run migrate:attachments )
 
 echo "==> Installing frontend dependencies"
