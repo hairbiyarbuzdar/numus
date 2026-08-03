@@ -12,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import ConfirmModal from "../../components/ConfirmModal";
+import Modal from "../../components/Modal";
 import { Product } from "../../types";
 import { useProducts } from "../../context/ProductContext";
 import { useOrders } from "../../context/OrdersContext";
@@ -649,9 +650,8 @@ const AdminAuctionsManager: React.FC = () => {
         const images = detailsAuction.images?.filter(Boolean) || [];
 
         return (
-        <div className="fixed inset-0 z-[94] flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Auction details">
-          <button className="absolute inset-0 bg-black/50" aria-label="Close details" onClick={() => setDetailsAuction(null)} />
-          <div className="relative max-h-[90vh] w-[95%] max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+        <Modal open onClose={() => setDetailsAuction(null)} label="Auction details" size="max-w-3xl">
+          <div className="max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Auction details</p>
@@ -776,7 +776,7 @@ const AdminAuctionsManager: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
+        </Modal>
         );
       })()}
 

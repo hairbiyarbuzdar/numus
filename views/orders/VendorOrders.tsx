@@ -12,6 +12,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useOrders } from "../../context/OrdersContext";
 import { buildPageList, formatCurrency, formatDateTime } from "../../utils/helpers";
 import { SkeletonTableRows } from "../../components/Skeleton";
+import Modal from "../../components/Modal";
 import {
   OrderQuery,
   OrderRecord,
@@ -504,9 +505,8 @@ const VendorOrders: React.FC = () => {
       </div>
 
       {detailsOrder && (
-        <div className="fixed inset-0 z-[94] flex items-center justify-center" role="dialog" aria-modal="true" aria-label="Order details">
-          <button className="absolute inset-0 bg-black/50" aria-label="Close details" onClick={() => setDetailsOrder(null)} />
-          <div className="relative max-h-[90vh] w-[95%] max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+        <Modal open onClose={() => setDetailsOrder(null)} label="Order details" size="max-w-2xl">
+          <div className="max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Order details</p>
@@ -576,7 +576,7 @@ const VendorOrders: React.FC = () => {
               {savingId === detailsOrder.id && <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

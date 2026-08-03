@@ -12,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import ConfirmModal from "../../components/ConfirmModal";
+import Modal from "../../components/Modal";
 import { useProducts } from "../../context/ProductContext";
 import { buildPageList, formatCurrency } from "../../utils/helpers";
 import { SkeletonTableRows } from "../../components/Skeleton";
@@ -532,10 +533,9 @@ const AdminProductsManager: React.FC = () => {
         }}
       />
 
-      {editTarget && (
-        <div className="fixed inset-0 z-[94]">
-          <button className="absolute inset-0 bg-black/40" aria-label="Close" onClick={() => setEditTarget(null)} />
-          <div className="absolute left-1/2 top-1/2 w-[92%] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-5 shadow-2xl">
+      <Modal open={!!editTarget} onClose={() => setEditTarget(null)} label="Edit product" size="max-w-lg">
+        {editTarget && (
+          <div className="rounded-xl bg-white p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-gray-900">Edit Product</h3>
             <div className="mt-4 grid gap-3">
               <div>
@@ -579,8 +579,8 @@ const AdminProductsManager: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 };

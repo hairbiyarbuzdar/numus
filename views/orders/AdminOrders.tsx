@@ -3,6 +3,7 @@ import { OrderStatus, useOrders } from "../../context/OrdersContext";
 import { formatCurrency } from "../../utils/helpers";
 import { Search } from "lucide-react";
 import { SkeletonTableRows } from "../../components/Skeleton";
+import Modal from "../../components/Modal";
 
 const ORDER_STATUS_OPTIONS: OrderStatus[] = ["Pending", "Confirmed", "Processing", "Shipped", "Delivered", "Cancelled"];
 
@@ -127,9 +128,8 @@ const AdminOrders: React.FC = () => {
       </div>
 
       {activeOrder && (
-        <div className="fixed inset-0 z-[94]">
-          <button className="absolute inset-0 bg-black/40" onClick={() => setActiveOrderId(null)} />
-          <div className="absolute left-1/2 top-1/2 w-[92%] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-5 shadow-2xl">
+        <Modal open onClose={() => setActiveOrderId(null)} label="Order details" size="max-w-2xl">
+          <div className="max-h-[85vh] overflow-y-auto rounded-xl bg-white p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-gray-900">Order Details: {activeOrder.id}</h3>
             <p className="mt-1 text-sm text-gray-500">
               {activeOrder.customerInfo.fullName} | {activeOrder.customerInfo.phone} | {activeOrder.addressInfo.city}
@@ -154,7 +154,7 @@ const AdminOrders: React.FC = () => {
               <button onClick={() => setActiveOrderId(null)} className="rounded-lg border border-gray-300 px-4 py-2 text-sm">Close</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

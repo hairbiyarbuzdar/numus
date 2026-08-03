@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import ConfirmModal from "../../components/ConfirmModal";
+import Modal from "../../components/Modal";
 import { SkeletonTableRows } from "../../components/Skeleton";
 import { useProducts } from "../../context/ProductContext";
 import { User } from "../../types";
@@ -460,10 +461,9 @@ const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({ defaultType = "al
         }}
       />
 
-      {editingUser && (
-        <div className="fixed inset-0 z-[94]">
-          <button className="absolute inset-0 bg-black/40" aria-label="Close" onClick={() => setEditingUser(null)} />
-          <div className="absolute left-1/2 top-1/2 w-[92%] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-5 shadow-2xl">
+      <Modal open={!!editingUser} onClose={() => setEditingUser(null)} label="Edit user details" size="max-w-lg">
+        {editingUser && (
+          <div className="rounded-xl bg-white p-5 shadow-2xl">
             <h3 className="text-lg font-bold text-gray-900">Edit User Details</h3>
             <div className="mt-4 grid gap-3">
               <div>
@@ -522,8 +522,8 @@ const AdminUsersManager: React.FC<AdminUsersManagerProps> = ({ defaultType = "al
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 };

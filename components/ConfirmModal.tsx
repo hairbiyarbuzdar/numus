@@ -1,4 +1,5 @@
 import React from "react";
+import Modal from "./Modal";
 
 interface ConfirmModalProps {
   open: boolean;
@@ -21,12 +22,9 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
   onCancel,
   onConfirm,
 }) => {
-  if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-[95]">
-      <button className="absolute inset-0 bg-black/50" onClick={onCancel} aria-label="Close modal" />
-      <div className="absolute left-1/2 top-1/2 w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
+    <Modal open={open} onClose={onCancel} label={title} size="max-w-md">
+      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl">
         <h3 className="text-lg font-bold text-gray-900">{title}</h3>
         <p className="mt-2 text-sm text-gray-600">{message}</p>
         <div className="mt-5 flex justify-end gap-2">
@@ -41,7 +39,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 };
 

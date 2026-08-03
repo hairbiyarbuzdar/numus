@@ -18,6 +18,7 @@ import { useProducts } from "../../context/ProductContext";
 import { Product } from "../../types";
 import { buildPageList, formatCurrency } from "../../utils/helpers";
 import AdminVendorApprovalsQueue from "./AdminVendorApprovalsQueue";
+import Modal from "../../components/Modal";
 import { SkeletonCards } from "../../components/Skeleton";
 import { PaginatedProducts, ProductSort, productApi } from "../../services/productApi";
 
@@ -646,10 +647,9 @@ const AdminApprovalsQueue: React.FC = () => {
         </section>
       )}
 
-      {selectedItem && (
-        <div className="fixed inset-0 z-[94] flex items-center justify-center">
-          <button className="absolute inset-0 bg-black/50" onClick={closeDetails} />
-          <div className="relative max-h-[90vh] w-[95%] max-w-3xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+      <Modal open={!!selectedItem} onClose={closeDetails} label="Submission review" size="max-w-3xl">
+        {selectedItem && (
+          <div className="max-h-[85vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">
@@ -744,16 +744,12 @@ const AdminApprovalsQueue: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
-      {rejectTarget && (
-        <div className="fixed inset-0 z-[95] flex items-center justify-center">
-          <button
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setRejectTarget(null)}
-          />
-          <div className="relative w-[92%] max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+      <Modal open={!!rejectTarget} onClose={() => setRejectTarget(null)} label="Reject submission" size="max-w-md">
+        {rejectTarget && (
+          <div className="rounded-2xl bg-white p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-gray-900">Reject Submission</h3>
             <p className="mt-1 text-sm text-gray-500">Provide a reason so the farmer knows what to fix.</p>
             <textarea
@@ -778,8 +774,8 @@ const AdminApprovalsQueue: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
       </>
       )}
     </div>
