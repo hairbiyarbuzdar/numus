@@ -5,6 +5,7 @@ const bcrypt = require("bcryptjs");
 const pool = require("../db");
 const { requireRole } = require("../middleware/auth");
 const { toLikePattern, parsePositiveInt } = require("../utils/sql");
+const { deleteStoredFile } = require("../utils/storage");
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 300;
@@ -702,14 +703,104 @@ router.post("/email/login", async (req, res) => {
 });
 
 // ─── DELETE /auth/users/:id ───────────────────────────────────────────────────
+/**
+ * Deleting an account also removes everything hanging off it.
+ *
+ * None of the `user_id` columns carry a foreign key, so nothing cascaded on its
+ * own — deleting a user used to leave their listings, basket, wishlist,
+ * notifications, bids and uploaded documents behind.
+ *
+ * Orders are the deliberate exception: an order is also the seller's sales
+ * record, and deleting it would rewrite their earnings history. The personal
+ * details are stripped from it instead, which is what "handled according to the
+ * data retention policy" means here. Say so if you would rather they were
+ * deleted outright.
+ */
 router.delete("/users/:id", requireRole("superAdmin"), async (req, res) => {
+  const client = await pool.connect();
   try {
-    const { rowCount } = await pool.query("DELETE FROM users WHERE id = $1", [req.params.id]);
+    const userId = req.params.id;
+
+    const { rows: userRows } = await client.query(
+      "SELECT id, vendor_profile FROM users WHERE id = $1",
+      [userId]
+    );
+    if (!userRows.length) return res.status(404).json({ message: "User not found" });
+
+    // Collect the files first — after the rows are gone there is nothing left
+    // to tell us which ones belonged to this account.
+    const { rows: productRows } = await client.query(
+      "SELECT images FROM products WHERE vendor_id = $1",
+      [userId]
+    );
+    const files = [];
+    productRows.forEach((row) => (row.images || []).forEach((image) => files.push(image)));
+
+    const profile = userRows[0].vendor_profile || {};
+    ["cnicFrontImage", "cnicBackImage"].forEach((field) => {
+      if (profile[field]) files.push(profile[field]);
+    });
+
+    // Tables added by later migrations may not exist on an older database.
+    const { rows: tableRows } = await client.query(
+      `SELECT to_regclass('public.cart_items') AS cart,
+              to_regclass('public.wishlist_items') AS wishlist,
+              to_regclass('public.notification_reads') AS reads`
+    );
+    const tables = tableRows[0];
+
+    await client.query("BEGIN");
+
+    if (tables.cart) await client.query("DELETE FROM cart_items WHERE user_id = $1", [userId]);
+    if (tables.wishlist) await client.query("DELETE FROM wishlist_items WHERE user_id = $1", [userId]);
+    if (tables.reads) await client.query("DELETE FROM notification_reads WHERE user_id = $1", [userId]);
+
+    await client.query("DELETE FROM notifications WHERE user_id = $1", [userId]);
+    await client.query("DELETE FROM bids WHERE bidder_id = $1", [userId]);
+
+    // An auction this account was winning has to forget that.
+    await client.query(
+      `UPDATE products
+       SET winner_bidder_id = NULL, winner_bidder_name = NULL, updated_at = $2
+       WHERE winner_bidder_id = $1`,
+      [userId, Date.now()]
+    );
+
+    // Their listings go, and bids/cart/wishlist rows pointing at those products
+    // cascade through the product foreign keys.
+    const { rowCount: productsRemoved } = await client.query(
+      "DELETE FROM products WHERE vendor_id = $1",
+      [userId]
+    );
+
+    // Orders are kept, minus the personal data.
+    const { rowCount: ordersAnonymised } = await client.query(
+      `UPDATE orders
+       SET customer_info = jsonb_build_object(
+             'fullName', 'Deleted account', 'phone', '', 'whatsapp', '', 'email', ''
+           )
+       WHERE customer_id = $1`,
+      [userId]
+    );
+
+    const { rowCount } = await client.query("DELETE FROM users WHERE id = $1", [userId]);
+    await client.query("COMMIT");
+
     if (!rowCount) return res.status(404).json({ message: "User not found" });
-    res.json({ success: true });
+
+    // Only once the database says the account is gone.
+    let filesRemoved = 0;
+    files.forEach((file) => {
+      if (deleteStoredFile(file)) filesRemoved += 1;
+    });
+
+    res.json({ success: true, productsRemoved, ordersAnonymised, filesRemoved });
   } catch (err) {
+    await client.query("ROLLBACK").catch(() => undefined);
     console.error("DELETE /auth/users/:id error:", err);
     res.status(500).json({ message: "Server error" });
+  } finally {
+    client.release();
   }
 });
 

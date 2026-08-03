@@ -104,6 +104,32 @@ function saveDataUrl(dataUrl, folder = "misc") {
   return `${PUBLIC_PREFIX}/${safeFolder}/${fileName}`;
 }
 
+/**
+ * Removes a file we stored, given the URL held in the database. External URLs
+ * and anything outside the upload root are ignored, and a missing file is not
+ * an error — the caller is deleting it either way.
+ */
+function deleteStoredFile(value) {
+  if (typeof value !== "string") return false;
+
+  const index = value.indexOf(PUBLIC_PREFIX);
+  if (index === -1) return false;
+
+  const relative = value.slice(index + PUBLIC_PREFIX.length).replace(/^\/+/, "");
+  if (!relative) return false;
+
+  const target = path.resolve(UPLOAD_ROOT, relative);
+  // Never follow a path that climbs out of the upload directory.
+  if (!target.startsWith(path.resolve(UPLOAD_ROOT))) return false;
+
+  try {
+    fs.unlinkSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Absolute URL for a stored path, based on the request that asked for it. */
 function toAbsoluteUrl(req, storedPath) {
   if (!storedPath.startsWith(PUBLIC_PREFIX)) return storedPath;
@@ -121,5 +147,6 @@ module.exports = {
   isDataUrl,
   isStoredUrl,
   saveDataUrl,
+  deleteStoredFile,
   toAbsoluteUrl,
 };
