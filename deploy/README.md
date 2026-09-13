@@ -15,6 +15,34 @@ Fill in these two values wherever you see them: **`numu.com.pk`** and **`72.61.1
 
 ---
 
+## Deploying to a SHARED box instead (e.g. 72.62.126.88)
+
+If the target VPS already hosts other sites (Node/PM2/Nginx/PostgreSQL/Certbot
+already installed, other domains already in `/etc/nginx/sites-enabled/`),
+**do not** run `01-server-setup.sh` — it installs/upgrades system packages,
+resets UFW, and assumes ports 3000/4000 are free, none of which is safe here.
+
+Instead:
+
+1. Inspect the box first — confirm which ports are already taken:
+   ```bash
+   ss -tlnp && pm2 list && ls /etc/nginx/sites-enabled/
+   ```
+2. Pick free ports for numu (this repo currently assumes **4100** for the
+   backend and **4101** for the frontend — see `deploy/ecosystem.config.js`
+   and `deploy/nginx-numu.conf`; change both together if those collide too).
+3. Run `bash deploy/01b-server-setup-shared.sh` instead of `01-server-setup.sh`
+   — it only creates the `numu` Postgres database/user (refusing to clobber
+   an existing one) and never touches Node/PM2/Nginx/Certbot/UFW.
+4. Continue from **step 2 ("Get the code onto the VPS")** below as normal.
+   In step 3, set `PORT=4100` in `backend/.env` (already the default in
+   `deploy/backend.env.production.example`).
+5. In step 5 (Nginx), do **not** run `sudo rm -f /etc/nginx/sites-enabled/default`
+   — other sites on the box may depend on it. Just symlink numu's own config
+   and reload.
+
+---
+
 ## 0. Point DNS at the VPS (do this first — TLS needs it)
 In your domain registrar, create an **A record**:
 

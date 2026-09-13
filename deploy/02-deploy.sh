@@ -58,4 +58,4 @@ echo "✅  Deploy complete. Status:"
 pm2 status
 echo ""
 echo "Logs:   pm2 logs"
-echo "Health: curl -s http://localhost:4000/health"
+echo "Health: curl -s http://localhost:\${BACKEND_PORT:-4000}/health"

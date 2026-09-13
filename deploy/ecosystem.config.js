@@ -7,6 +7,14 @@
 //   pm2 save
 //
 // Assumes the repo lives at /var/www/numu. Change APP_DIR if you cloned elsewhere.
+//
+// NOTE: this box (72.62.126.88) is a SHARED server hosting other sites
+// (bloodbank, ib-panaflex, marquee, star-panaflex, wa-bridge under PM2, plus
+// several more under nginx/docker). Ports 3000-3003, 3007, 3010, 3011, 3014,
+// 3019-3022, 3030 and 5050/5051 were already taken at deploy time, so numu
+// uses 4100/4101 instead of the usual 3000/4000. If port 4000 is genuinely
+// free you could use it for the backend, but 4100/4101 keeps a clean gap
+// away from everything else already observed on the box.
 
 const APP_DIR = "/var/www/numu";
 
@@ -20,6 +28,7 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
+        PORT: "4100",
       },
       // Reads secrets from backend/.env via dotenv (already wired in index.js).
       max_memory_restart: "400M",
@@ -28,14 +37,14 @@ module.exports = {
     {
       name: "numu-frontend",
       cwd: APP_DIR,
-      // `next start` — serves the production build on port 3000.
+      // `next start` — serves the production build on port 4101.
       script: "node_modules/next/dist/bin/next",
-      args: "start -p 3000",
+      args: "start -p 4101",
       instances: 1,
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        PORT: "3000",
+        PORT: "4101",
       },
       max_memory_restart: "500M",
       time: true,
